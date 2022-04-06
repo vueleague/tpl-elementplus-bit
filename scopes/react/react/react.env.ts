@@ -52,6 +52,7 @@ import envPreviewDevConfigFactory from './webpack/webpack.config.env.dev';
 import componentPreviewProdConfigFactory from './webpack/webpack.config.component.prod';
 import componentPreviewDevConfigFactory from './webpack/webpack.config.component.dev';
 import { generateAddAliasesFromPeersTransformer } from './webpack/transformers';
+import { esmTransformTsConfig } from './typescript/esm-transform-tsconfig';
 
 export const ReactEnvType = 'react';
 const defaultTsConfig = require('./typescript/tsconfig.json');
@@ -194,7 +195,8 @@ export class ReactEnv
    */
   getTsEsmCompiler(mode: CompilerMode = 'dev', transformers: TsConfigTransformer[] = [], tsModule = ts) {
     const tsCompileOptions = this.getTsCompilerOptions(mode);
-    return this.tsAspect.createEsmCompiler(tsCompileOptions, transformers, tsModule);
+    const newTransformers = [esmTransformTsConfig, ...transformers];
+    return this.tsAspect.createEsmCompiler(tsCompileOptions, newTransformers, tsModule);
   }
 
   getCompiler(transformers: TsConfigTransformer[] = [], tsModule = ts) {
