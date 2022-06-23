@@ -1782,6 +1782,12 @@
         "mainFile": "index.ts",
         "rootDir": "scopes/workspace/variants"
     },
+    "vite": {
+        "scope": "",
+        "version": "",
+        "mainFile": "index.ts",
+        "rootDir": "scopes/vite/vite"
+    },
     "webpack": {
         "scope": "teambit.webpack",
         "version": "0.0.768",

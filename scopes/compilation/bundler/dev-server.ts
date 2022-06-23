@@ -10,17 +10,17 @@ export interface DevServer {
   listen(port: number): Server | Promise<Server>;
 
   /**
-   * display name of the tester.
+   * display name of the dev server.
    */
   displayName?: string;
 
   /**
-   * icon of the tester.
+   * icon of the dev server.
    */
   icon?: string;
 
   /**
-   * serialized config of the tester.
+   * serialized config of the dev server.
    */
   displayConfig?(): string;
 
@@ -30,12 +30,12 @@ export interface DevServer {
   configPath?: string;
 
   /**
-   * id of the tester.
+   * id of the dev server.
    */
   id: string;
 
   /**
-   * return the tester version.
+   * return the dev server version.
    */
   version?(): string;
 }
