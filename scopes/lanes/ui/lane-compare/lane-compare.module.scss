@@ -1,0 +1,25 @@
+.laneCompare {
+    overflow-y: hidden;
+    height: 100%;
+    > div {
+        height: 100%;
+        padding: 10px;
+        box-sizing: border-box;
+        overflow-y: auto;
+    }
+}
+.componentCompareDrawer {
+    border: 1px solid #ededed;
+    border-radius: 8px;
+    padding: 12px;
+    &:not(:last-child) {
+        margin: 10px 0;
+    }
+}
+
+.drawerContent {
+    overflow: auto;
+    &.openDrawer {
+        max-height: 600px;
+    }
+}

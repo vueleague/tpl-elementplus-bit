@@ -8,9 +8,12 @@ import { Link, LinkProps } from '@teambit/base-react.navigation.link';
 import { Menu, MenuWidgetSlot } from '@teambit/ui-foundation.ui.menu';
 import styles from './lanes-overview-menu.module.scss';
 
+
+
+
 export type LanesNavPlugin = {
   props: LinkProps;
-  order?: number;
+  order: number;
   hide?: () => boolean;
 };
 export type LanesOrderedNavigationSlot = SlotRegistry<LanesNavPlugin[]>;

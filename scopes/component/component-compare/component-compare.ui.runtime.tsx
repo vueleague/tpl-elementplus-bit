@@ -26,8 +26,8 @@ export class ComponentCompareUI {
 
   static dependencies = [ComponentAspect];
 
-  getComponentComparePage = () => (
-    <ComponentCompare navSlot={this.navSlot} routeSlot={this.routeSlot} host={this.host} />
+  getComponentComparePage = (props?: {}) => (
+    <ComponentCompare navSlot={this.navSlot} routeSlot={this.routeSlot} host={this.host} {...props} />
   );
 
   registerNavigation(route: ComponentCompareNav | Array<ComponentCompareNav>) {

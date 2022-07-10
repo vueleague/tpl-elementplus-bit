@@ -34,3 +34,5 @@ export {
   LanesOrderedNavigationSlot,
   LanesNavPlugin,
 } from './menu';
+
+export {LaneCompare} from './lane-compare'

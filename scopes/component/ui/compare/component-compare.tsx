@@ -14,7 +14,7 @@ import { ComponentCompareBlankState } from './blank-state';
 import styles from './component-compare.module.scss';
 
 export type ComponentCompareProps = {
-  navSlot: ComponentCompareNavSlot;
+  navSlot?: ComponentCompareNavSlot;
   routeSlot: RouteSlot;
   host: string;
 } & HTMLAttributes<HTMLDivElement>;
@@ -37,10 +37,11 @@ const groupByVersion = (accum: Map<string, LegacyComponentLog>, current: LegacyC
 
 export function ComponentCompare({ navSlot, host, routeSlot }: ComponentCompareProps) {
   const baseVersion = useCompareQueryParam('baseVersion');
+  console.log("baseVersion", baseVersion, routeSlot)
   const component = useContext(ComponentContext);
   const location = useLocation();
 
-  const isWorkspace = host === 'teambit.workspace/workspace';
+  const isWorkspace = host === 'teambit.workspace/workspace' || host === 'workspace';
   const allVersionInfo = component.logs?.slice().reverse() || [];
   const isNew = allVersionInfo.length === 0;
   const compareVersion =
@@ -58,12 +59,13 @@ export function ComponentCompare({ navSlot, host, routeSlot }: ComponentCompareP
     component.id;
 
   const compare = component;
-
+  // debugger
+  console.log("baseId.toString()", baseId.toString(), component, host)
   const { component: base, loading } = useComponent(host, baseId.toString());
-
+  console.log("nothingToCompare",compareVersion, loading, compareIsLocalChanges, component.logs)
   const nothingToCompare = !loading && !compareIsLocalChanges && (component.logs?.length || []) < 2;
   const showSubMenus = !loading && !nothingToCompare;
-
+  // debugger
   const logsByVersion = useMemo(
     () => allVersionInfo.reduce(groupByVersion, new Map<string, LegacyComponentLog>()),
     [compare.id, baseId]
@@ -80,7 +82,7 @@ export function ComponentCompare({ navSlot, host, routeSlot }: ComponentCompareP
     loading,
     logsByVersion,
   };
-
+  console.log("model", componentCompareModel)
   return (
     <ComponentCompareContext.Provider value={componentCompareModel}>
       <div className={styles.componentCompareContainer}>
@@ -95,7 +97,7 @@ export function ComponentCompare({ navSlot, host, routeSlot }: ComponentCompareP
               <ComponentCompareVersionPicker />
             </div>
             <div className={styles.bottom}>
-              <CompareMenuNav navSlot={navSlot} />
+              {navSlot && <CompareMenuNav navSlot={navSlot} />}
               <SlotRouter slot={routeSlot} />
             </div>
           </>

@@ -18,7 +18,10 @@ import {
   useLanesContext,
   LanesNavPlugin,
   LaneReadmeOverview,
+  LaneCompare,
 } from '@teambit/lanes.ui.lanes';
+import { ComponentCompareUI, ComponentCompareAspect } from '@teambit/component-compare';
+// import { ComponentCompare } from '@teambit/component.ui.compare';
 import { NotFoundPage } from '@teambit/design.ui.pages.not-found';
 import ScopeAspect, { ScopeUI } from '@teambit/scope';
 import WorkspaceAspect, { WorkspaceUI } from '@teambit/workspace';
@@ -27,7 +30,7 @@ import SidebarAspect, { SidebarUI } from '@teambit/sidebar';
 import { MenuWidget, MenuWidgetSlot } from '@teambit/ui-foundation.ui.menu';
 
 export class LanesUI {
-  static dependencies = [UIAspect, ComponentAspect, WorkspaceAspect, ScopeAspect, SidebarAspect];
+  static dependencies = [UIAspect, ComponentAspect, WorkspaceAspect, ScopeAspect, SidebarAspect, ComponentCompareAspect];
   static runtime = UIRuntime;
   static slots = [
     Slot.withType<RouteProps>(),
@@ -41,12 +44,15 @@ export class LanesUI {
     private routeSlot: RouteSlot,
     private navSlot: LanesOrderedNavigationSlot,
     private menuWidgetSlot: MenuWidgetSlot,
+    
+
     /**
      * overview line slot to add new lines beneath the overview section
      */
     private overviewSlot: LaneOverviewLineSlot,
     private workspace?: WorkspaceUI,
-    private scope?: ScopeUI
+    private scope?: ScopeUI,
+    private componentCompare?: ComponentCompareUI,
   ) {
     this.hostAspect = workspace || scope;
     this.lanesHost = workspace ? 'workspace' : 'scope';
@@ -75,6 +81,14 @@ export class LanesUI {
                 path="~gallery"
                 element={
                   <LaneGallery routeSlot={this.routeSlot} overviewSlot={this.overviewSlot} host={this.lanesHost} />
+                }
+              />
+              <Route
+                path="~compare/*"
+                element={
+                  // this.componentCompare
+                  // <ComponentCompare routeSlot={this.routeSlot} navSlot={this.navSlot} /* overviewSlot={this.overviewSlot} */ host={this.lanesHost} />
+                  <LaneCompare ComponentCompare={this.componentCompare?.getComponentComparePage({navSlot: undefined})} /* routeSlot={this.routeSlot} navSlot={this.navSlot} */ /* overviewSlot={this.overviewSlot} */ /* host={this.lanesHost} */ />
                 }
               />
               <Route path="~component/*" element={this.componentUi.getComponentUI(this.host)} />
@@ -127,6 +141,14 @@ export class LanesUI {
         },
         order: 1,
       },
+      {
+        props: {
+          href: '~compare',
+          children: 'Compare',
+          exact: true,
+        },
+        order: 2,
+      },
     ]);
   }
 
@@ -157,7 +179,7 @@ export class LanesUI {
   }
 
   static async provider(
-    [uiUi, componentUi, workspaceUi, scopeUi, sidebarUi]: [UiUI, ComponentUI, WorkspaceUI, ScopeUI, SidebarUI],
+    [uiUi, componentUi, workspaceUi, scopeUi, sidebarUi, compareUi]: [UiUI, ComponentUI, WorkspaceUI, ScopeUI, SidebarUI, ComponentCompareUI],
     _,
     [routeSlot, overviewSlot, navSlot, menuWidgetSlot]: [
       RouteSlot,
@@ -177,10 +199,11 @@ export class LanesUI {
     if (host === ScopeAspect.id) {
       scope = scopeUi;
     }
-    const lanesUi = new LanesUI(componentUi, routeSlot, navSlot, overviewSlot, menuWidgetSlot, workspace, scope);
+    const lanesUi = new LanesUI(componentUi, routeSlot, navSlot, overviewSlot, menuWidgetSlot, workspace, scope, compareUi);
     uiUi.registerRenderHooks({ reactContext: lanesUi.renderContext });
     const drawer = new LanesDrawer({ showScope: lanesUi.lanesHost === 'workspace' });
     sidebarUi.registerDrawer(drawer);
+    // compareUi.getComponentComparePage()
     lanesUi.registerRoutes();
     lanesUi.registerMenuWidget(() => <UseLaneMenu host={lanesUi.lanesHost} />);
     return lanesUi;

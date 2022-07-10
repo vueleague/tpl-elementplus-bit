@@ -19,15 +19,16 @@ export function useComponent(host: string, id?: string, options?: UseComponentOp
   const query = useQuery();
   const { version, logFilters } = options || {};
   const componentVersion = (version || query.get('version')) ?? undefined;
-
-  if (!id) throw new TypeError('useComponent received no component id');
+  // debugger
+  // if (!id) throw new TypeError('useComponent received no component id');
 
   const componentIdStr = withVersion(id, componentVersion);
 
   return useComponentQuery(componentIdStr, host, logFilters);
 }
 
-function withVersion(id: string, version?: string) {
+function withVersion(id?: string, version?: string) {
+  if(!id) return;
   if (!version) return id;
   if (id.includes('@')) return id;
   return `${id}@${version}`;
