@@ -129,16 +129,17 @@ export class Http implements Network {
   static async getNetworkConfig(): Promise<NetworkConfig> {
     const obj = await list();
 
-    const strictSSL = obj[CFG_NETWORK_STRICT_SSL] ?? obj[CFG_PROXY_STRICT_SSL]
+    // Reading strictSSL from both network.strict-ssl and network.strict_ssl for backward compatibility.
+    const strictSSL = obj[CFG_NETWORK_STRICT_SSL] ?? obj['network.strict_ssl'] ?? obj[CFG_PROXY_STRICT_SSL];
     return {
-      fetchRetries: obj[CFG_FETCH_RETRIES],
-      fetchRetryFactor: obj[CFG_FETCH_RETRY_FACTOR],
-      fetchRetryMintimeout: obj[CFG_FETCH_RETRY_MINTIMEOUT],
-      fetchRetryMaxtimeout: obj[CFG_FETCH_RETRY_MAXTIMEOUT],
-      fetchTimeout: obj[CFG_FETCH_TIMEOUT],
+      fetchRetries: obj[CFG_FETCH_RETRIES] ?? 2,
+      fetchRetryFactor: obj[CFG_FETCH_RETRY_FACTOR] ?? 10,
+      fetchRetryMintimeout: obj[CFG_FETCH_RETRY_MINTIMEOUT] ?? 10000,
+      fetchRetryMaxtimeout: obj[CFG_FETCH_RETRY_MAXTIMEOUT] ?? 60000,
+      fetchTimeout: obj[CFG_FETCH_TIMEOUT] ?? 60000,
       localAddress: obj[CFG_LOCAL_ADDRESS],
-      maxSockets: obj[CFG_MAX_SOCKETS],
-      networkConcurrency: obj[CFG_NETWORK_CONCURRENCY],
+      maxSockets: obj[CFG_MAX_SOCKETS] ?? 15,
+      networkConcurrency: obj[CFG_NETWORK_CONCURRENCY] ?? 16,
       strictSSL: typeof strictSSL === 'string' ? strictSSL === 'true' : strictSSL,
       ca: obj[CFG_NETWORK_CA] ?? obj[CFG_PROXY_CA],
       cafile: obj[CFG_NETWORK_CA_FILE] ?? obj[CFG_PROXY_CA_FILE],
@@ -415,45 +416,6 @@ export class Http implements Network {
     });
 
     return Component.fromString(data.scope._getLegacy);
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async deprecateMany(ids: string[]): Promise<Record<string, any>[]> {
-    throw new Error(
-      `deprecation of a remote component has been disabled. deprecate locally with an updated version of bit and then tag and export`
-    );
-    // const DEPRECATE_COMPONENTS = gql`
-    //   mutation deprecate($bitIds: [String!]!) {
-    //     deprecate(bitIds: $bitIds) {
-    //       bitIds
-    //       missingComponents
-    //     }
-    //   }
-    // `;
-    // const res = await this.graphClientRequest(DEPRECATE_COMPONENTS, Verb.WRITE, {
-    //   bitIds: ids,
-    // });
-    // return res.deprecate;
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async undeprecateMany(ids: string[]): Promise<Record<string, any>[]> {
-    throw new Error(
-      `un-deprecation of a remote component has been disabled. undeprecate locally with an updated version of bit and then tag and export`
-    );
-    // const UNDEPRECATE_COMPONENTS = gql`
-    //   mutation deprecate($bitIds: [String!]!) {
-    //     undeprecate(bitIds: $bitIds) {
-    //       bitIds
-    //       missingComponents
-    //     }
-    //   }
-    // `;
-    // const res = await this.graphClientRequest(UNDEPRECATE_COMPONENTS, Verb.WRITE, {
-    //   bitIds: ids,
-    // });
-
-    // return res.undeprecate;
   }
 
   async log(id: BitId): Promise<ComponentLog[]> {
