@@ -47,7 +47,7 @@ export async function workspaceConfig({ name, defaultScope, empty }: WorkspaceCo
         "teambit.react/react": {},
       },
       "{envs/**}, {extensions/**}": {
-        "teambit.harmony/aspect": {},
+        "teambit.envs/env": {},
       },
     }`),
   };
