@@ -1,12 +1,18 @@
-import { Slot, SlotRegistry } from '@teambit/harmony';
+import { clone } from 'lodash';
+import { join, resolve } from 'path';
+import fs from 'fs-extra';
+
+import { Slot, SlotRegistry, Harmony } from '@teambit/harmony';
 import { buildRegistry } from '@teambit/legacy/dist/cli';
 import { Command } from '@teambit/legacy/dist/cli/command';
 import { CommunityAspect } from '@teambit/community';
 import type { CommunityMain } from '@teambit/community';
+import { AspectDefinition } from '@teambit/aspect-loader';
 
 import { groups, GroupsType } from '@teambit/legacy/dist/cli/command-groups';
 import { loadConsumerIfExist } from '@teambit/legacy/dist/consumer';
-import { clone } from 'lodash';
+import { sha1 } from '@teambit/legacy/dist/utils';
+
 import { CLIAspect, MainRuntime } from './cli.aspect';
 import { AlreadyExistsError } from './exceptions/already-exists';
 import { getCommandId } from './get-command-id';
@@ -15,6 +21,7 @@ import { CLIParser } from './cli-parser';
 import { CompletionCmd } from './completion.cmd';
 import { CliCmd, CliGenerateCmd } from './cli.cmd';
 import { HelpCmd } from './help.cmd';
+import { createRoot } from './create-root';
 
 export type CommandList = Array<Command>;
 export type OnStart = (hasWorkspace: boolean) => Promise<void>;
@@ -25,7 +32,12 @@ export type CommandsSlot = SlotRegistry<CommandList>;
 export class CLIMain {
   public groups: GroupsType = clone(groups); // if it's not cloned, it is cached across loadBit() instances
 
-  constructor(private commandsSlot: CommandsSlot, private onStartSlot: OnStartSlot, private community: CommunityMain) {}
+  constructor(
+    private commandsSlot: CommandsSlot,
+    private onStartSlot: OnStartSlot,
+    private community: CommunityMain,
+    private harmony: Harmony
+  ) {}
 
   /**
    * registers a new command in to the CLI.
@@ -50,6 +62,30 @@ export class CLIMain {
       });
       this.commandsSlot.map.set(aspectId, filteredCommands);
     });
+  }
+
+  // TODO !! refactor this with the UI runtime to dedup code
+  /**
+   * generate the root file of the CLI runtime.
+   */
+  async generateRoot(
+    aspectDefs: AspectDefinition[],
+    rootExtensionName: string,
+    runtimeName = MainRuntime.name,
+    rootAspect = CLIAspect.id,
+    config?: object
+  ) {
+    const contents = await createRoot(
+      aspectDefs,
+      rootExtensionName,
+      rootAspect,
+      runtimeName,
+      config || this.harmony.config.toObject()
+    );
+    const filepath = resolve(join(__dirname, `${runtimeName}.root${sha1(contents)}.js`));
+    if (fs.existsSync(filepath)) return filepath;
+    fs.outputFileSync(filepath, contents);
+    return filepath;
   }
 
   /**
@@ -124,11 +160,11 @@ export class CLIMain {
   static slots = [Slot.withType<CommandList>(), Slot.withType<OnStart>()];
 
   static async provider(
-    [community]: [CommunityMain],
+    [community, harmony]: [CommunityMain, Harmony],
     config,
     [commandsSlot, onStartSlot]: [CommandsSlot, OnStartSlot]
   ) {
-    const cliMain = new CLIMain(commandsSlot, onStartSlot, community);
+    const cliMain = new CLIMain(commandsSlot, onStartSlot, community, harmony);
     const legacyRegistry = buildRegistry();
     await ensureWorkspaceAndScope();
     const legacyCommands = legacyRegistry.commands;
