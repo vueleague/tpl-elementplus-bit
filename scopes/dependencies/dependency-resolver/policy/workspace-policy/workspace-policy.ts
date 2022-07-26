@@ -3,6 +3,7 @@ import { sortObject } from '@teambit/legacy/dist/utils';
 import { Policy, SemverVersion, GitUrlVersion, FileSystemPath, PolicyConfigKeys } from '../policy';
 import { KEY_NAME_BY_LIFECYCLE_TYPE, WorkspaceDependencyLifecycleType } from '../../dependencies';
 import { EntryAlreadyExist } from './exceptions';
+import { snapToSemver } from '@teambit/component-package-version';
 
 export type WorkspacePolicyConfigKeys = Omit<PolicyConfigKeys, 'devDependencies'>;
 export type WorkspacePolicyConfigKeysNames = keyof WorkspacePolicyConfigKeys;
@@ -136,7 +137,7 @@ export class WorkspacePolicy implements Policy<WorkspacePolicyConfigObject> {
     };
     this._policiesEntries.reduce((acc, entry) => {
       const keyName = KEY_NAME_BY_LIFECYCLE_TYPE[entry.lifecycleType];
-      acc[keyName][entry.dependencyId] = entry.value.version;
+      acc[keyName][entry.dependencyId] = snapToSemver(entry.value.version);
       return acc;
     }, res);
     return res;

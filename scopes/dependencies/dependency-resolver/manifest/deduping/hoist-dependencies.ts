@@ -14,6 +14,7 @@ import { ManifestDependenciesObject } from '../manifest';
 import { DependencyLifecycleType, SemverVersion, PackageName } from '../../dependencies';
 import { DedupedDependencies, DedupedDependenciesPeerConflicts } from './dedupe-dependencies';
 import { PackageNameIndex, PackageNameIndexItem, PackageNameIndexComponentItem } from './index-by-dep-id';
+import { isHash } from '@teambit/component-version';
 
 type ItemsGroupedByRangeOrVersion = {
   ranges: PackageNameIndexComponentItem[];
@@ -425,9 +426,11 @@ function groupByRangeOrVersion(indexItems: PackageNameIndexComponentItem[]): Ite
   };
   indexItems.forEach((item) => {
     const validRange = semver.validRange(item.range);
-    if (!validRange) {
-      throw new Error(`fatal: the version "${item.range}" originated from a dependent "${item.origin}" is invalid semver range.
-this is a temporary issue with unsupported snaps (hashes) on the registry and will be fixed very soon`);
+    if (!validRange && isHash(item.range)) {
+      result.versions.push(item);
+      return;
+      //       throw new Error(`fatal: the version "${item.range}" originated from a dependent "${item.origin}" is invalid semver range.
+      // this is a temporary issue with unsupported snaps (hashes) on the registry and will be fixed very soon`);
     }
     // parseRange does not support `*` as version
     // `*` does not affect resulted version, it might be just ignored
