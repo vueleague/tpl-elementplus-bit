@@ -1,31 +1,34 @@
-import { useRouteMatch } from 'react-router-dom';
-import { ComponentID } from '@teambit/component-id';
 import { useQuery } from '@teambit/ui-foundation.ui.react-router.use-query';
 import { ComponentDescriptor } from '@teambit/component-descriptor';
 import { ComponentModel } from './component-model';
 import { ComponentError } from './component-error';
-import { useComponentQuery } from './use-component-query';
+import { Filters, useComponentQuery } from './use-component-query';
 
 export type Component = {
   component?: ComponentModel;
   error?: ComponentError;
   componentDescriptor?: ComponentDescriptor;
+  loading?: boolean;
+};
+export type UseComponentOptions = {
+  version?: string;
+  logFilters?: Filters;
+  customUseComponent?: UseComponentType;
 };
 
-type ComponentRoute = {
-  componentId?: string;
-};
+export type UseComponentType = (id: string, host: string, filters?: Filters) => Component;
 
-export function useComponent(host: string, id?: ComponentID): Component {
-  const {
-    params: { componentId },
-  } = useRouteMatch<ComponentRoute>();
+export function useComponent(host: string, id?: string, options?: UseComponentOptions): Component {
   const query = useQuery();
-  const version = query.get('version') || undefined;
+  const { version, logFilters, customUseComponent } = options || {};
+  const componentVersion = (version || query.get('version')) ?? undefined;
 
-  const targetId = id?.toString({ ignoreVersion: true }) || componentId;
-  if (!targetId) throw new TypeError('useComponent received no component id');
-  return useComponentQuery(withVersion(targetId, version), host);
+  if (!id) throw new TypeError('useComponent received no component id');
+
+  const componentIdStr = withVersion(id, componentVersion);
+  const targetUseComponent = customUseComponent || useComponentQuery;
+
+  return targetUseComponent(componentIdStr, host, logFilters);
 }
 
 function withVersion(id: string, version?: string) {

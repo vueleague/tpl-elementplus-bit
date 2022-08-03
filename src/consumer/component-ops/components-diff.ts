@@ -67,8 +67,7 @@ export default async function componentsDiff(
       throw new GeneralError(`component ${component.id.toString()} doesn't have any version yet`);
     }
     const repository = consumer.scope.objects;
-    // @ts-ignore AUTO-ADDED-AFTER-MIGRATION-PLEASE-FIX!
-    const fromVersionObject: Version = await modelComponent.loadVersion(version, repository);
+    const fromVersionObject: Version = await modelComponent.loadVersion(version as string, repository);
     const versionFiles = await fromVersionObject.modelFilesToSourceFiles(repository);
     const fsFiles = component.files;
     // $FlowFixMe version must be defined as the component.componentFromModel do exist
@@ -188,7 +187,7 @@ async function getOneFileDiff(
   const regExpA = /--- ["]?a.*\n/; // exact "---", follow by a or "a (for Windows) then \n
   const regExpB = /\+\+\+ ["]?b.*\n/; // exact "+++", follow by b or "b (for Windows) then \n
   return fileDiff
-    .substr(diffStart)
+    .slice(diffStart)
     .replace(regExpA, `--- ${fileName} (${fileALabel})\n`)
     .replace(regExpB, `+++ ${fileName} (${fileBLabel})\n`);
 }

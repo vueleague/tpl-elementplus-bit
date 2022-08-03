@@ -1,7 +1,6 @@
 import { Command, CommandOptions } from '@teambit/cli';
 import { LinkResults } from '@teambit/dependency-resolver';
 import { Logger } from '@teambit/logger';
-import { BASE_DOCS_DOMAIN } from '@teambit/legacy/dist/constants';
 import { timeFormat } from '@teambit/toolbox.time.time-format';
 import chalk from 'chalk';
 import { Workspace, WorkspaceLinkOptions } from '../workspace';
@@ -18,12 +17,13 @@ type LinkCommandOpts = {
   skipFetchingObjects?: boolean;
 };
 export class LinkCommand implements Command {
-  name = 'link [ids...]';
+  name = 'link [component-names...]';
   alias = '';
-  description = `generate symlinks to resolve module paths for imported components.\n  https://${BASE_DOCS_DOMAIN}/docs/dependencies#missing-links`;
-  shortDescription = 'link components and core aspects';
+  description = 'create links in the node_modules directory, to core aspects and to components in the workspace';
+  extendedDescription: string;
   group = 'development';
   private = false;
+  arguments = [{ name: 'component-names...', description: 'names or IDs of the components to link' }];
   options = [
     ['j', 'json', 'return the output as JSON'],
     ['', 'verbose', 'verbose output'],
@@ -45,8 +45,12 @@ export class LinkCommand implements Command {
     /**
      * logger extension.
      */
-    private logger: Logger
-  ) {}
+    private logger: Logger,
+
+    private docsDomain: string
+  ) {
+    this.extendedDescription = `https://${this.docsDomain}/workspace/component-links`;
+  }
 
   async report([ids]: [string[]], opts: LinkCommandOpts) {
     const startTime = Date.now();

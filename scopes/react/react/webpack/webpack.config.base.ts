@@ -72,10 +72,6 @@ export default function (isEnvProduction = false): Configuration {
       alias: {
         'react/jsx-dev-runtime': require.resolve('react/jsx-dev-runtime.js'),
         'react/jsx-runtime': require.resolve('react/jsx-runtime.js'),
-        // Support React Native Web
-        // https://www.smashingmagazine.com/2016/08/a-glimpse-into-the-future-with-react-native-for-web/
-        // TODO: @uri please remember to remove after publishing evangelist and base-ui
-
         'react-dom/server': require.resolve('react-dom/server'),
         // Allows for better profiling with ReactDevTools
         ...(isEnvProductionProfile && {
@@ -297,6 +293,9 @@ export default function (isEnvProduction = false): Configuration {
                   maxSize: imageInlineSizeLimit,
                 },
               },
+              generator: {
+                filename: 'static/images/[hash][ext][query]',
+              },
             },
             {
               // loads svg as both inlineUrl and react component, like:
@@ -319,6 +318,14 @@ export default function (isEnvProduction = false): Configuration {
                 },
               ],
             },
+            {
+              test: /\.(woff(2)?|ttf|eot|svg)(\?v=\d+\.\d+\.\d+)?$/,
+              type: 'asset',
+              generator: {
+                filename: 'static/fonts/[hash][ext][query]',
+              },
+            },
+
             // "file" loader makes sure those assets get served by WebpackDevServer.
             // When you `import` an asset, you get its (virtual) filename.
             // In production, they would get copied to the `build` folder.
@@ -330,6 +337,9 @@ export default function (isEnvProduction = false): Configuration {
               // Also exclude `html` and `json` extensions so they get processed
               // by webpacks internal loaders.
               exclude: [/\.(js|mjs|cjs|jsx|ts|tsx)$/, /\.html$/, /\.mdx?/, /\.json$/, /\.css$/],
+              generator: {
+                filename: 'static/[hash][ext][query]',
+              },
               type: 'asset',
             },
             // ** STOP ** Are you adding a new loader?

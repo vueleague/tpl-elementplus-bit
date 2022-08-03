@@ -33,30 +33,12 @@ describe('untag components on Harmony', function () {
       expect(() => helper.command.untagAll()).not.to.throw();
     });
   });
-  describe('un-tagging a non-head version', () => {
-    before(() => {
-      helper.scopeHelper.setNewLocalAndRemoteScopes();
-      helper.bitJsonc.setupDefault();
-      helper.fixtures.populateComponents(1);
-      helper.command.tagAllWithoutBuild();
-      helper.fixtures.populateComponents(1, undefined, 'v2');
-      helper.command.tagAllWithoutBuild();
-      helper.fixtures.populateComponents(1, undefined, 'v3');
-      helper.command.tagAllWithoutBuild();
-    });
-    // before, it was removing the parents from 0.0.3
-    it('should block the untag process', () => {
-      expect(() => helper.command.untag('comp1', '0.0.2')).to.throw(
-        'unable to untag "comp1", the version "0.0.2" is not the head'
-      );
-    });
-  });
   describe('untagging multiple versions', () => {
     before(() => {
       helper.scopeHelper.setNewLocalAndRemoteScopesHarmony();
       helper.fixtures.populateComponents(1);
-      helper.command.tagScopeWithoutBuild(); // 0.0.1
-      helper.command.tagScopeWithoutBuild(); // 0.0.2
+      helper.command.tagIncludeUnmodifiedWithoutBuild(); // 0.0.1
+      helper.command.tagIncludeUnmodifiedWithoutBuild(); // 0.0.2
       helper.command.untagAll();
     });
     // a previous bug saved the hash of 0.0.1 as the head, which made the component both: staged and snapped.
@@ -69,10 +51,10 @@ describe('untag components on Harmony', function () {
       helper.scopeHelper.setNewLocalAndRemoteScopesHarmony();
       helper.bitJsonc.setupDefault();
       helper.fixtures.populateComponents(1);
-      helper.command.tagScopeWithoutBuild(); // 0.0.1
+      helper.command.tagIncludeUnmodifiedWithoutBuild(); // 0.0.1
       helper.command.export();
-      helper.command.tagScopeWithoutBuild(); // 0.0.2
-      helper.command.tagScopeWithoutBuild(); // 0.0.3
+      helper.command.tagIncludeUnmodifiedWithoutBuild(); // 0.0.2
+      helper.command.tagIncludeUnmodifiedWithoutBuild(); // 0.0.3
       helper.command.untagAll();
     });
     // a previous bug saved the hash of 0.0.2 as the head.

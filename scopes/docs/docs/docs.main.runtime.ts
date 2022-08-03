@@ -2,7 +2,7 @@ import { Slot, SlotRegistry } from '@teambit/harmony';
 import { MainRuntime } from '@teambit/cli';
 import { LoggerAspect, LoggerMain, Logger } from '@teambit/logger';
 import { CompilerAspect, CompilerMain } from '@teambit/compiler';
-import ComponentAspect, { Component, ComponentMap } from '@teambit/component';
+import { Component, ComponentMap, IComponent } from '@teambit/component';
 import { PkgAspect, PkgMain } from '@teambit/pkg';
 import type { Environment } from '@teambit/envs';
 import { GraphqlAspect, GraphqlMain } from '@teambit/graphql';
@@ -11,13 +11,14 @@ import DevFilesAspect, { DevFilesMain } from '@teambit/dev-files';
 import { AbstractVinyl } from '@teambit/legacy/dist/consumer/component/sources';
 import ConsumerComponent from '@teambit/legacy/dist/consumer/component';
 import { Workspace, WorkspaceAspect } from '@teambit/workspace';
+import { Doc, DocPropList } from '@teambit/docs.entities.doc';
+import { EnvsAspect, EnvsMain } from '@teambit/envs';
 import { DocsAspect } from './docs.aspect';
 import { DocsPreviewDefinition } from './docs.preview-definition';
 import { docsSchema } from './docs.graphql';
 import { DocReader } from './doc-reader';
 import { DefaultDocReader } from './default-doc-reader';
 import { FileExtensionNotSupported } from './exceptions';
-import { Doc, DocPropList } from './doc';
 
 export type ComponentDocs = {
   files: string[];
@@ -57,6 +58,8 @@ export class DocsMain {
     private logger: Logger,
 
     private devFiles: DevFilesMain,
+
+    private envs: EnvsMain,
 
     private docPropSlot: DocPropSlot,
 
@@ -114,7 +117,8 @@ export class DocsMain {
         const doc = await docReader.read(docFile.relative, docFile.contents, component);
         return doc;
       } catch (err: any) {
-        this.logger.error('docs.main.runtime.computeDoc caught an error', err);
+        // it's ok to fail here.
+        this.logger.debug(`docs.main.runtime.computeDoc caught an error: ${err.message}`);
         return null;
       }
     }
@@ -122,8 +126,8 @@ export class DocsMain {
     return null;
   }
 
-  getDoc(component: Component) {
-    const docData = component.state.aspects.get(DocsAspect.id)?.data?.doc;
+  getDoc(component: IComponent) {
+    const docData = component.get(DocsAspect.id)?.data?.doc;
     if (!docData) return null;
     return new Doc(docData.filePath, new DocPropList(docData.props));
   }
@@ -132,6 +136,16 @@ export class DocsMain {
     return this.patterns;
   }
 
+  getComponentDevPatterns(component: Component) {
+    const env = this.envs.calculateEnv(component).env;
+    const componentEnvDocsDevPatterns: string[] = env.getDocsDevPatterns ? env.getDocsDevPatterns(component) : [];
+    const componentPatterns = componentEnvDocsDevPatterns.concat(this.getPatterns());
+    return componentPatterns;
+  }
+
+  getDevPatternToRegister() {
+    return this.getComponentDevPatterns.bind(this);
+  }
   /**
    * register a new doc reader. this allows to support further
    * documentation file formats.
@@ -152,7 +166,7 @@ export class DocsMain {
     CompilerAspect,
     LoggerAspect,
     DevFilesAspect,
-    ComponentAspect,
+    EnvsAspect,
   ];
 
   static defaultConfig = {
@@ -160,14 +174,15 @@ export class DocsMain {
   };
 
   static async provider(
-    [preview, graphql, workspace, pkg, compiler, loggerAspect, devFiles]: [
+    [preview, graphql, workspace, pkg, compiler, loggerAspect, devFiles, envs]: [
       PreviewMain,
       GraphqlMain,
       Workspace,
       PkgMain,
       CompilerMain,
       LoggerMain,
-      DevFilesMain
+      DevFilesMain,
+      EnvsMain
     ],
     config: DocsConfig,
     [docPropSlot, docReaderSlot]: [DocPropSlot, DocReaderSlot]
@@ -188,15 +203,18 @@ export class DocsMain {
 
       devFiles,
 
+      envs,
+
       docPropSlot,
 
       docReaderSlot
     );
     docs.registerDocReader(new DefaultDocReader(pkg, compiler, workspace));
-    devFiles.registerDevPattern(config.patterns);
+    devFiles.registerDevPattern(docs.getDevPatternToRegister());
 
     if (workspace) {
-      workspace.onComponentLoad(async (component) => {
+      workspace.onComponentLoad(async (component, opts) => {
+        if (opts?.loadDocs === false) return undefined;
         const doc = await docs.computeDoc(component);
 
         return {

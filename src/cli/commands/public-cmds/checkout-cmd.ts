@@ -3,18 +3,23 @@ import chalk from 'chalk';
 import { checkout } from '../../../api/consumer';
 import { LATEST, WILDCARD_HELP } from '../../../constants';
 import { CheckoutProps } from '../../../consumer/versions-ops/checkout-version';
-import { ApplyVersionResults, getMergeStrategy } from '../../../consumer/versions-ops/merge-version';
+import {
+  ApplyVersionResults,
+  getMergeStrategy,
+  applyVersionReport,
+  conflictSummaryReport,
+} from '../../../consumer/versions-ops/merge-version';
 import { Group } from '../../command-groups';
 import { CommandOptions, LegacyCommand } from '../../legacy-command';
-import { applyVersionReport } from './merge-cmd';
 
 export default class Checkout implements LegacyCommand {
   name = 'checkout [values...]';
-  shortDescription = 'switch between component versions';
+  description = 'switch between component versions or remove local changes';
   group: Group = 'development';
-  description = `switch between component versions or remove local changes
+  extendedDescription = `
   \`bit checkout <version> [ids...]\` => checkout the specified ids (or all components when --all is used) to the specified version
-  \`bit checkout latest [ids...]\` => checkout the specified ids (or all components when --all is used) to their latest versions
+  \`bit checkout head\` => checkout all components to their latest versions
+  \`bit checkout head [ids...]\` => checkout the specified ids to their latest versions
   \`bit checkout [ids...] --reset\` => remove local modifications from the specified ids (or all components when --all is used)
   ${WILDCARD_HELP('checkout 0.0.1')}`;
   alias = 'U';
@@ -27,7 +32,7 @@ export default class Checkout implements LegacyCommand {
     ['o', 'ours', 'in case of a conflict, override the used version with the current modification'],
     ['t', 'theirs', 'in case of a conflict, override the current modification with the specified version'],
     ['m', 'manual', 'in case of a conflict, leave the files with a conflict state to resolve them manually later'],
-    ['r', 'reset', 'remove local changes'],
+    ['r', 'reset', 'revert changes that were not snapped/tagged'],
     ['a', 'all', 'all components'],
     ['v', 'verbose', 'showing verbose output for inspection'],
     ['', 'skip-npm-install', 'DEPRECATED. use "--skip-dependency-installation" instead'],
@@ -99,7 +104,7 @@ export default class Checkout implements LegacyCommand {
   }
 
   report(
-    { components, version, failedComponents }: ApplyVersionResults,
+    { components, version, failedComponents, leftUnresolvedConflicts }: ApplyVersionResults,
     _,
     { verbose, all }: { verbose: boolean; all: boolean }
   ): string {
@@ -136,6 +141,14 @@ export default class Checkout implements LegacyCommand {
         .join('\n');
       return `${title}\n${body}\n\n`;
     };
+    const getConflictSummary = () => {
+      if (!components || !components.length || !leftUnresolvedConflicts) return '';
+      const title = `\n\nfiles with conflicts summary\n`;
+      const suggestion = `\n\nfix the conflicts above manually and then run "bit install" and "bit compile".
+once ready, snap/tag the components to persist the changes`;
+      return chalk.underline(title) + conflictSummaryReport(components) + chalk.yellow(suggestion);
+    };
+
     const getSuccessfulOutput = () => {
       if (!components || !components.length) return '';
       if (components.length === 1) {
@@ -163,6 +176,6 @@ export default class Checkout implements LegacyCommand {
       return title + componentsStr;
     };
 
-    return getFailureOutput() + getNeutralOutput() + getSuccessfulOutput();
+    return getFailureOutput() + getNeutralOutput() + getSuccessfulOutput() + getConflictSummary();
   }
 }

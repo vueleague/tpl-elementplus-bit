@@ -1,15 +1,12 @@
 import React, { useContext } from 'react';
 import flatten from 'lodash.flatten';
-import { ComponentContext, ComponentDescriptorContext } from '@teambit/component';
+import { ComponentContext, useComponentDescriptor } from '@teambit/component';
 import type { SlotRegistry } from '@teambit/harmony';
 import { ComponentPreview } from '@teambit/preview.ui.component-preview';
 import { StatusMessageCard } from '@teambit/design.ui.surfaces.status-message-card';
 import { ComponentOverview, TitleBadge } from '@teambit/component.ui.component-meta';
-import { useFetchDocs } from '@teambit/component.ui.hooks.use-fetch-docs';
-import { useLanesContext } from '@teambit/lanes.ui.lanes';
+import { LaneBreadcrumb, useLanesContext } from '@teambit/lanes.ui.lanes';
 import { Separator } from '@teambit/design.ui.separator';
-import { Icon } from '@teambit/evangelist.elements.icon';
-import { Ellipsis } from '@teambit/design.ui.styles.ellipsis';
 import styles from './overview.module.scss';
 
 export type TitleBadgeSlot = SlotRegistry<TitleBadge[]>;
@@ -20,59 +17,39 @@ export type OverviewProps = {
 
 export function Overview({ titleBadges }: OverviewProps) {
   const component = useContext(ComponentContext);
-  const componentDescriptor = useContext(ComponentDescriptorContext);
+  const componentDescriptor = useComponentDescriptor();
   const lanesModel = useLanesContext();
-  const laneId = lanesModel?.currentLane?.id;
-  const { data } = useFetchDocs(component.id.toString());
-  const fetchComponent = data?.component;
+  const currentLane = lanesModel?.viewedLane;
+
+  const showHeader = !component.preview?.legacyHeader;
+
   if (component?.buildStatus === 'pending' && component?.host === 'teambit.scope/scope')
     return (
       <StatusMessageCard style={{ margin: 'auto' }} status="PROCESSING" title="component preview pending">
         this might take some time
       </StatusMessageCard>
     );
+
   if (component?.buildStatus === 'failed' && component?.host === 'teambit.scope/scope')
-    return (
-      <StatusMessageCard
-        style={{ margin: 'auto' }}
-        status="FAILURE"
-        title="failed to get component preview "
-      ></StatusMessageCard>
-    );
+    return <StatusMessageCard style={{ margin: 'auto' }} status="FAILURE" title="failed to get component preview " />;
 
-  if (component.preview?.includesEnvTemplate === false) {
-    const labels = component.labels.length > 0 ? component.labels : fetchComponent?.labels;
-    const badges = flatten(titleBadges.values());
-
-    return (
-      <div className={styles.overviewWrapper}>
-        {laneId && <LaneOverview laneId={laneId} />}
-        <Separator isPresentational />
+  return (
+    <div className={styles.overviewWrapper}>
+      {currentLane && <LaneBreadcrumb lane={currentLane} />}
+      {currentLane && <Separator isPresentational />}
+      {showHeader && (
         <ComponentOverview
           className={styles.componentOverviewBlock}
           displayName={component.displayName}
           version={component.version}
-          abstract={component.description || fetchComponent?.description}
-          labels={labels || []}
+          abstract={component.description}
+          labels={component.labels}
           packageName={component.packageName}
-          titleBadges={badges}
+          titleBadges={flatten(titleBadges.values())}
           componentDescriptor={componentDescriptor}
-        />
-        <ComponentPreview
           component={component}
-          style={{ width: '100%', height: '100%' }}
-          previewName="overview"
-          fullContentHeight
-          scrolling="no"
         />
-      </div>
-    );
-  }
-
-  return laneId ? (
-    <div className={styles.overviewWrapper}>
-      <LaneOverview laneId={laneId} />
-      <Separator isPresentational />
+      )}
       <ComponentPreview
         component={component}
         style={{ width: '100%', height: '100%' }}
@@ -80,22 +57,6 @@ export function Overview({ titleBadges }: OverviewProps) {
         fullContentHeight
         scrolling="no"
       />
-    </div>
-  ) : (
-    <ComponentPreview
-      component={component}
-      style={{ width: '100%', height: '100%' }}
-      previewName="overview"
-      fullContentHeight
-    />
-  );
-}
-
-function LaneOverview({ laneId }: { laneId: string }): JSX.Element {
-  return (
-    <div className={styles.lane}>
-      <Icon of="lane"></Icon>
-      <Ellipsis className={styles.laneName}>{laneId}</Ellipsis>
     </div>
   );
 }

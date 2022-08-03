@@ -1,3 +1,4 @@
+import { compact } from 'lodash';
 import * as path from 'path';
 import R from 'ramda';
 
@@ -5,6 +6,7 @@ import NoIdMatchWildcard from '../../api/consumer/lib/exceptions/no-id-match-wil
 import { BitId, BitIds } from '../../bit-id';
 import { COMPONENT_ORIGINS, LATEST } from '../../constants';
 import { DivergeData } from '../../scope/component-ops/diverge-data';
+import { getDivergeData } from '../../scope/component-ops/get-diverge-data';
 import { Lane } from '../../scope/models';
 import ModelComponent from '../../scope/models/model-component';
 import Version from '../../scope/models/version';
@@ -17,14 +19,16 @@ import ComponentMap, { ComponentOrigin } from '../bit-map/component-map';
 import Component from '../component';
 import { InvalidComponent } from '../component/consumer-component';
 import Consumer from '../consumer';
+import { ComponentLoadOptions } from './component-loader';
 
 export type ObjectsList = Promise<{ [componentId: string]: Version }>;
-
+export type DivergeDataPerId = { id: BitId; divergeData: DivergeData };
 export type ListScopeResult = {
   id: BitId;
   currentlyUsedVersion?: string | null | undefined;
   remoteVersion?: string;
   deprecated?: boolean;
+  laneReadmeOf?: string[];
 };
 
 export type DivergedComponent = { id: BitId; diverge: DivergeData };
@@ -74,10 +78,10 @@ export default class ComponentsList {
     return this._fromObjectsIds;
   }
 
-  async getAuthoredAndImportedFromFS(): Promise<Component[]> {
+  async getAuthoredAndImportedFromFS(loadOpts?: ComponentLoadOptions): Promise<Component[]> {
     let [authored, imported] = await Promise.all([
-      this.getFromFileSystem(COMPONENT_ORIGINS.AUTHORED),
-      this.getFromFileSystem(COMPONENT_ORIGINS.IMPORTED),
+      this.getFromFileSystem(COMPONENT_ORIGINS.AUTHORED, loadOpts),
+      this.getFromFileSystem(COMPONENT_ORIGINS.IMPORTED, loadOpts),
     ]);
     authored = authored || [];
     imported = imported || [];
@@ -89,11 +93,10 @@ export default class ComponentsList {
    * changed in the file system
    *
    * @param {boolean} [load=false] - Whether to load the component (false will return only the id)
-   * @return {Promise<string[]>}
    */
-  async listModifiedComponents(load = false): Promise<Array<BitId | Component>> {
+  async listModifiedComponents(load = false, loadOpts?: ComponentLoadOptions): Promise<Array<BitId | Component>> {
     if (!this._modifiedComponents) {
-      const fileSystemComponents = await this.getAuthoredAndImportedFromFS();
+      const fileSystemComponents = await this.getAuthoredAndImportedFromFS(loadOpts);
       const componentsWithUnresolvedConflicts = this.listDuringMergeStateComponents();
       const componentStatuses = await this.consumer.getManyComponentsStatuses(fileSystemComponents.map((f) => f.id));
       this._modifiedComponents = fileSystemComponents
@@ -108,8 +111,8 @@ export default class ComponentsList {
     return this._modifiedComponents.map((component) => component.id);
   }
 
-  async listOutdatedComponents(): Promise<Component[]> {
-    const fileSystemComponents = await this.getAuthoredAndImportedFromFS();
+  async listOutdatedComponents(loadOpts?: ComponentLoadOptions): Promise<Component[]> {
+    const fileSystemComponents = await this.getAuthoredAndImportedFromFS(loadOpts);
     const componentsFromModel = await this.getModelComponents();
     const componentsWithUnresolvedConflicts = this.listDuringMergeStateComponents();
     const mergePendingComponents = await this.listMergePendingComponents();
@@ -151,7 +154,7 @@ export default class ComponentsList {
    * to show them in the "snapped" section in bit-status.
    */
   async listSnappedComponentsOnMain() {
-    if (!this.scope.lanes.isOnDefaultLane()) {
+    if (!this.scope.lanes.isOnMain()) {
       return [];
     }
     const componentsFromModel = await this.getModelComponents();
@@ -163,9 +166,36 @@ export default class ComponentsList {
       .filter((c) => c.isHeadSnap());
   }
 
-  async listMergePendingComponents(): Promise<DivergedComponent[]> {
+  /**
+   * list components on a lane that their main got updates.
+   */
+  async listUpdatesFromMainPending(): Promise<DivergeDataPerId[]> {
+    if (this.scope.lanes.isOnMain()) {
+      return [];
+    }
+    const authoredAndImportedIds = this.bitMap.getAuthoredAndImportedBitIds();
+
+    const componentsFromModel = await this.getModelComponents();
+    const compFromModelOnWorkspace = componentsFromModel.filter((c) =>
+      authoredAndImportedIds.hasWithoutVersion(c.toBitId())
+    );
+    const results = await Promise.all(
+      compFromModelOnWorkspace.map(async (modelComponent) => {
+        const headOnMain = modelComponent.head;
+        const headOnLane = modelComponent.laneHeadLocal;
+        if (!headOnMain || !headOnLane) return undefined;
+        const divergeData = await getDivergeData(this.scope.objects, modelComponent, headOnMain, headOnLane, false);
+        if (!divergeData.snapsOnRemoteOnly.length && !divergeData.err) return undefined;
+        return { id: modelComponent.toBitId(), divergeData };
+      })
+    );
+
+    return compact(results);
+  }
+
+  async listMergePendingComponents(loadOpts?: ComponentLoadOptions): Promise<DivergedComponent[]> {
     if (!this._mergePendingComponents) {
-      const componentsFromFs = await this.getAuthoredAndImportedFromFS();
+      const componentsFromFs = await this.getAuthoredAndImportedFromFS(loadOpts);
       const componentsFromModel = await this.getModelComponents();
       const componentsWithUnresolvedConflicts = this.listDuringMergeStateComponents();
       this._mergePendingComponents = (
@@ -213,8 +243,8 @@ export default class ComponentsList {
     return Promise.all(components);
   }
 
-  async authoredAndImportedComponents(): Promise<Component[]> {
-    return this.getAuthoredAndImportedFromFS();
+  async authoredAndImportedComponents(loadOpts?: ComponentLoadOptions): Promise<Component[]> {
+    return this.getAuthoredAndImportedFromFS(loadOpts);
   }
 
   async idsFromObjects(): Promise<BitIds> {
@@ -227,10 +257,9 @@ export default class ComponentsList {
    * Components that are registered in bit.map but have never been tagged
    *
    * @param {boolean} [load=false] - Whether to load the component (false will return only the id)
-   * @return {Promise.<string[] | Component[]>}
    * @memberof ComponentsList
    */
-  async listNewComponents(load = false): Promise<BitIds | Component[]> {
+  async listNewComponents(load = false, loadOpts?: ComponentLoadOptions): Promise<BitIds | Component[]> {
     const idsFromBitMap = this.idsFromBitMap();
     const idsFromObjects = await this.idsFromObjects();
     const newComponents: BitId[] = [];
@@ -243,11 +272,15 @@ export default class ComponentsList {
     const newComponentsIds = new BitIds(...newComponents);
     if (!load || !newComponents.length) return newComponentsIds;
 
-    const { components } = await this.consumer.loadComponents(newComponentsIds, false);
+    const { components } = await this.consumer.loadComponents(newComponentsIds, false, loadOpts);
     return components;
   }
 
-  async listTagPendingOfAllScope(includeImported = false): Promise<BitId[]> {
+  /**
+   * list all components that can be tagged.
+   * in Harmony - it's all the components in the workspace. (the "includeImported" param does nothing)
+   */
+  async listPotentialTagAllWorkspace(includeImported = false): Promise<BitId[]> {
     const tagPendingComponents = this.idsFromBitMap(COMPONENT_ORIGINS.AUTHORED);
     if (includeImported) {
       const importedComponents = this.idsFromBitMap(COMPONENT_ORIGINS.IMPORTED);
@@ -267,9 +300,9 @@ export default class ComponentsList {
       this.listNewComponents(),
       this.listModifiedComponents(),
     ]);
+    const duringMergeIds = this.listDuringMergeStateComponents();
 
-    // @ts-ignore AUTO-ADDED-AFTER-MIGRATION-PLEASE-FIX!
-    return BitIds.fromArray([...newComponents, ...modifiedComponents]);
+    return BitIds.fromArray([...(newComponents as BitId[]), ...(modifiedComponents as BitId[]), ...duringMergeIds]);
   }
 
   async listExportPendingComponentsIds(lane?: Lane | null): Promise<BitIds> {
@@ -291,21 +324,21 @@ export default class ComponentsList {
     return this.updateIdsFromModelIfTheyOutOfSync(ids);
   }
 
-  async listNonNewComponentsIds(): Promise<BitIds> {
-    const authoredAndImported = await this.getAuthoredAndImportedFromFS();
+  async listNonNewComponentsIds(loadOpts?: ComponentLoadOptions): Promise<BitIds> {
+    const authoredAndImported = await this.getAuthoredAndImportedFromFS(loadOpts);
     // @ts-ignore AUTO-ADDED-AFTER-MIGRATION-PLEASE-FIX!
     const newComponents: BitIds = await this.listNewComponents();
     const nonNewComponents = authoredAndImported.filter((component) => !newComponents.has(component.id));
     return BitIds.fromArray(nonNewComponents.map((c) => c.id.changeVersion(undefined)));
   }
 
-  async updateIdsFromModelIfTheyOutOfSync(ids: BitIds): Promise<BitIds> {
+  async updateIdsFromModelIfTheyOutOfSync(ids: BitIds, loadOpts?: ComponentLoadOptions): Promise<BitIds> {
     const authoredAndImported = this.bitMap.getAuthoredAndImportedBitIds();
     const updatedIdsP = ids.map(async (id: BitId) => {
       const idFromBitMap = authoredAndImported.searchWithoutScopeAndVersion(id);
       if (idFromBitMap && !idFromBitMap.hasVersion()) {
         // component is out of sync, fix it by loading it from the consumer
-        const component = await this.consumer.loadComponent(id.changeVersion(LATEST));
+        const component = await this.consumer.loadComponent(id.changeVersion(LATEST), loadOpts);
         return component.id;
       }
       return id;
@@ -344,12 +377,12 @@ export default class ComponentsList {
    * of that directory. The bit.map is used to find them all
    * If they are on bit.map but not on the file-system, populate them to _invalidComponents property
    */
-  async getFromFileSystem(origin?: ComponentOrigin): Promise<Component[]> {
+  async getFromFileSystem(origin?: ComponentOrigin, loadOpts?: ComponentLoadOptions): Promise<Component[]> {
     const cacheKeyName = origin || 'all';
     if (!this._fromFileSystem[cacheKeyName]) {
       const idsFromBitMap = this.idsFromBitMap(origin);
       // @ts-ignore AUTO-ADDED-AFTER-MIGRATION-PLEASE-FIX!
-      const { components, invalidComponents } = await this.consumer.loadComponents(idsFromBitMap, false);
+      const { components, invalidComponents } = await this.consumer.loadComponents(idsFromBitMap, false, loadOpts);
       this._fromFileSystem[cacheKeyName] = components;
       if (!this._invalidComponents && !origin) {
         this._invalidComponents = invalidComponents;
@@ -372,25 +405,11 @@ export default class ComponentsList {
    * valid on legacy only. Harmony requires components to have their own directories
    */
   async listComponentsWithIndividualFiles(): Promise<Component[]> {
-    if (this.consumer.isLegacy) return [];
     const workspaceComponents = await this.getFromFileSystem(COMPONENT_ORIGINS.AUTHORED);
     return workspaceComponents.filter((component) => {
       const componentMap = component.componentMap;
       if (!componentMap) throw new Error('listComponentsWithIndividualFiles componentMap is missing');
-      return Boolean(!componentMap.trackDir && !componentMap.rootDir);
-    });
-  }
-
-  /**
-   * valid on legacy only. Harmony creates `rootDir` instead of the `trackDir`.
-   */
-  async listComponentsWithTrackDir() {
-    if (this.consumer.isLegacy) return [];
-    const workspaceComponents = await this.getFromFileSystem(COMPONENT_ORIGINS.AUTHORED);
-    return workspaceComponents.filter((component) => {
-      const componentMap = component.componentMap;
-      if (!componentMap) throw new Error('listComponentsWithIndividualFiles componentMap is missing');
-      return Boolean(componentMap.trackDir);
+      return Boolean(!componentMap.rootDir);
     });
   }
 
@@ -439,10 +458,13 @@ export default class ComponentsList {
     const listAllResults: ListScopeResult[] = await Promise.all(
       idsSorted.map(async (id: BitId) => {
         const component = modelComponents.find((c) => c.toBitId().isEqualWithoutVersion(id));
+        const laneReadmeOf = await component?.isLaneReadmeOf(this.scope.objects);
+
         const deprecated = await component?.isDeprecated(this.scope.objects);
         return {
           id: component ? component.toBitIdWithLatestVersion() : id,
           deprecated,
+          laneReadmeOf,
         };
       })
     );
@@ -474,7 +496,7 @@ export default class ComponentsList {
     };
     return listAllResults.filter((listResult) => {
       const componentMap = this.bitMap.getComponentIfExist(listResult.id, { ignoreVersion: true });
-      return componentMap && componentMap.origin !== COMPONENT_ORIGINS.NESTED && isIdOnCurrentLane(componentMap);
+      return componentMap && isIdOnCurrentLane(componentMap);
     });
   }
 
@@ -488,10 +510,13 @@ export default class ComponentsList {
       : components;
     const componentsSorted = ComponentsList.sortComponentsByName(componentsFilteredByWildcards);
     return Promise.all(
-      componentsSorted.map(async (component: ModelComponent) => ({
-        id: component.toBitIdWithLatestVersion(),
-        deprecated: await component.isDeprecated(scope.objects),
-      }))
+      componentsSorted.map(async (component: ModelComponent) => {
+        return {
+          id: component.toBitIdWithLatestVersion(),
+          deprecated: await component.isDeprecated(scope.objects),
+          laneReadmeOf: await component?.isLaneReadmeOf(scope.objects),
+        };
+      })
     );
   }
 

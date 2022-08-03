@@ -2,15 +2,10 @@ import { Consumer } from '..';
 import { BitIds } from '../../bit-id';
 import loader from '../../cli/loader';
 import { BEFORE_LOADING_COMPONENTS } from '../../cli/loader/loader-messages';
-import { RemoteLaneId } from '../../lane-id/lane-id';
 import { Lane } from '../../scope/models';
-import WorkspaceLane from '../bit-map/workspace-lane';
 import ComponentsList from '../component/components-list';
 
 export async function updateLanesAfterExport(consumer: Consumer, lane: Lane) {
-  // lanes that don't have remoteLaneId should not be updated. it happens when updating to a
-  // different remote with no intention to save the remote.
-  if (!lane.remoteLaneId) return;
   const currentLane = consumer.getCurrentLaneId();
   const isCurrentLane = lane.name === currentLane.name;
   if (!isCurrentLane) {
@@ -18,13 +13,9 @@ export async function updateLanesAfterExport(consumer: Consumer, lane: Lane) {
       `updateLanesAfterExport should get called only with current lane, got ${lane.name}, current ${currentLane.name}`
     );
   }
-  const workspaceLanesToUpdate: WorkspaceLane[] = [];
-  const remoteLaneId = lane.remoteLaneId as RemoteLaneId;
-  consumer.bitMap.setRemoteLane(remoteLaneId);
-  const workspaceLane = consumer.bitMap.workspaceLane as WorkspaceLane; // bitMap.workspaceLane is empty only when is on main
-  consumer.bitMap.updateLanesProperty(workspaceLane, remoteLaneId);
-  workspaceLane.reset();
-  await Promise.all(workspaceLanesToUpdate.map((l) => l.write()));
+  consumer.bitMap.setCurrentLane(lane.toLaneId(), true);
+  consumer.scope.scopeJson.removeLaneFromNew(lane.name);
+  lane.isNew = false;
 }
 
 export async function getLaneCompIdsToExport(
@@ -45,8 +36,7 @@ export async function getLaneCompIdsToExport(
 }
 
 export function isUserTryingToExportLanes(consumer: Consumer) {
-  const currentLaneId = consumer.getCurrentLaneId();
-  return !currentLaneId.isDefault();
+  return consumer.isOnLane();
 }
 
 // leave this here in case we do want to guess whether a user wants to export a lane.

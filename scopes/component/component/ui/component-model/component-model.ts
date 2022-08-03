@@ -2,7 +2,8 @@ import { Composition, CompositionProps } from '@teambit/compositions';
 import { DeprecationInfo } from '@teambit/deprecation';
 import { Descriptor } from '@teambit/envs';
 import { ComponentID, ComponentIdObj } from '@teambit/component-id';
-
+import { LegacyComponentLog } from '@teambit/legacy-component-log';
+import { ComponentPreviewSize } from '@teambit/preview';
 import { Tag } from '../../tag';
 import { TagMap } from '../../tag-map';
 import { TagProps } from '../../tag/tag';
@@ -29,10 +30,13 @@ export type ComponentModelProps = {
   host?: string;
   latest?: string;
   preview?: ComponentPreview;
+  logs?: LegacyComponentLog[];
+  size?: ComponentPreviewSize;
 };
 
 export type ComponentPreview = {
   includesEnvTemplate?: boolean;
+  legacyHeader?: boolean;
 };
 
 export type ComponentServer = {
@@ -114,11 +118,19 @@ export class ComponentModel {
     readonly host?: string,
 
     /**
+     *
+     * size preview
+     */
+    readonly size?: ComponentPreviewSize,
+
+    /**
      * latest version of component
      */
     readonly latest?: string,
 
-    readonly preview?: ComponentPreview
+    readonly preview?: ComponentPreview,
+
+    readonly logs?: LegacyComponentLog[]
   ) {}
 
   get version() {
@@ -147,6 +159,8 @@ export class ComponentModel {
     host,
     latest,
     preview,
+    size,
+    logs,
   }: ComponentModelProps) {
     return new ComponentModel(
       ComponentID.fromObject(id),
@@ -164,8 +178,10 @@ export class ComponentModel {
       description,
       labels,
       host,
+      size,
       latest,
-      preview
+      preview,
+      logs
     );
   }
 

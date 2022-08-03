@@ -5,8 +5,9 @@ import { MainAspect, AspectLoaderMain } from '@teambit/aspect-loader';
 import { ComponentMap } from '@teambit/component';
 import { Logger } from '@teambit/logger';
 import { PathAbsolute } from '@teambit/legacy/dist/utils/path';
+import { PeerDependencyRules } from '@pnpm/types';
 import { MainAspectNotInstallable, RootDirNotDefined } from './exceptions';
-import { PackageManager, PackageManagerInstallOptions } from './package-manager';
+import { PackageManager, PackageManagerInstallOptions, PackageImportMethod } from './package-manager';
 import { WorkspacePolicy } from './policy';
 
 const DEFAULT_PM_INSTALL_OPTIONS: PackageManagerInstallOptions = {
@@ -30,6 +31,7 @@ export type InstallArgs = {
 
 export type InstallOptions = {
   installTeambitBit: boolean;
+  packageManagerConfigRootDir?: string;
 };
 
 export type PreInstallSubscriber = (installer: DependencyInstaller, installArgs: InstallArgs) => Promise<void>;
@@ -57,7 +59,17 @@ export class DependencyInstaller {
 
     private postInstallSubscriberList?: PostInstallSubscriberList,
 
-    private nodeLinker?: 'hoisted' | 'isolated'
+    private nodeLinker?: 'hoisted' | 'isolated',
+
+    private packageImportMethod?: PackageImportMethod,
+
+    private sideEffectsCache?: boolean,
+
+    private nodeVersion?: string,
+
+    private engineStrict?: boolean,
+
+    private peerDependencyRules?: PeerDependencyRules
   ) {}
 
   async install(
@@ -81,12 +93,18 @@ export class DependencyInstaller {
       throw new RootDirNotDefined();
     }
     // Make sure to take other default if passed options with only one option
-    const calculatedPmOpts = Object.assign(
-      {},
-      DEFAULT_PM_INSTALL_OPTIONS,
-      { cacheRootDir: this.cacheRootDir, nodeLinker: this.nodeLinker },
-      packageManagerOptions
-    );
+    const calculatedPmOpts = {
+      ...DEFAULT_PM_INSTALL_OPTIONS,
+      cacheRootDir: this.cacheRootDir,
+      nodeLinker: this.nodeLinker,
+      packageImportMethod: this.packageImportMethod,
+      sideEffectsCache: this.sideEffectsCache,
+      nodeVersion: this.nodeVersion,
+      engineStrict: this.engineStrict,
+      packageManagerConfigRootDir: options.packageManagerConfigRootDir,
+      peerDependencyRules: this.peerDependencyRules,
+      ...packageManagerOptions,
+    };
     if (options.installTeambitBit) {
       if (!mainAspect.version || !mainAspect.packageName) {
         throw new MainAspectNotInstallable();
@@ -101,8 +119,14 @@ export class DependencyInstaller {
       });
     }
 
-    // remove node modules dir for all components dirs, since it might contain left overs from previous install
-    await this.cleanCompsNodeModules(componentDirectoryMap);
+    if (!packageManagerOptions.rootComponents && !packageManagerOptions.keepExistingModulesDir) {
+      // Remove node modules dir for all components dirs, since it might contain left overs from previous install.
+      //
+      // This is not needed when "rootComponents" are used, as in that case the package manager handles the node_modules
+      // and it never leaves node_modules in a broken state.
+      // Removing node_modules in that case would delete useful state information that is used by Yarn or pnpm.
+      await this.cleanCompsNodeModules(componentDirectoryMap);
+    }
 
     // TODO: the cache should be probably passed to the package manager constructor not to the install function
     await this.packageManager.install(finalRootDir, rootPolicy, componentDirectoryMap, calculatedPmOpts);

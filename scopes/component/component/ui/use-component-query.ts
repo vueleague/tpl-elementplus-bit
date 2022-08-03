@@ -7,7 +7,7 @@ import { ComponentDescriptor } from '@teambit/component-descriptor';
 import { ComponentModel } from './component-model';
 import { ComponentError } from './component-error';
 
-const componentIdFields = gql`
+export const componentIdFields = gql`
   fragment componentIdFields on ComponentID {
     name
     version
@@ -15,26 +15,58 @@ const componentIdFields = gql`
   }
 `;
 
-const componentFields = gql`
-  fragment componentFields on Component {
+export const componentOverviewFields = gql`
+  fragment componentOverviewFields on Component {
     id {
       ...componentIdFields
     }
-    aspects(include: ["teambit.preview/preview", "teambit.pipelines/builder"]) {
+    aspects(include: ["teambit.preview/preview", "teambit.envs/envs"]) {
+      # 'id' property in gql refers to a *global* identifier and used for caching.
+      # this makes aspect data cache under the same key, even when they are under different components.
+      # renaming the property fixes that.
       id
       data
     }
-    packageName
     elementsUrl
     description
+    deprecation {
+      isDeprecate
+      newId
+    }
     labels
     displayName
-    latest
     server {
       env
       url
     }
     buildStatus
+    env {
+      id
+      icon
+    }
+    size {
+      compressedTotal
+    }
+    preview {
+      includesEnvTemplate
+      legacyHeader
+    }
+    compositions {
+      identifier
+      displayName
+    }
+  }
+  ${componentIdFields}
+`;
+
+export const componentFields = gql`
+  fragment componentFields on Component {
+    id {
+      ...componentIdFields
+    }
+    ...componentOverviewFields
+    packageName
+    latest
     compositions {
       identifier
       displayName
@@ -42,20 +74,30 @@ const componentFields = gql`
     tags {
       version
     }
-    env {
+    logs(type: $logType, offset: $logOffset, limit: $logLimit, head: $logHead, sort: $logSort) {
       id
-      icon
-    }
-
-    preview {
-      includesEnvTemplate
+      message
+      username
+      email
+      date
+      hash
+      tag
     }
   }
   ${componentIdFields}
+  ${componentOverviewFields}
 `;
 
 const GET_COMPONENT = gql`
-  query Component($id: String!, $extensionId: String!) {
+  query Component(
+    $id: String!
+    $extensionId: String!
+    $logType: String
+    $logOffset: Int
+    $logLimit: Int
+    $logHead: String
+    $logSort: String
+  ) {
     getHost(id: $extensionId) {
       id # used for GQL caching
       get(id: $id) {
@@ -67,7 +109,7 @@ const GET_COMPONENT = gql`
 `;
 
 const SUB_SUBSCRIPTION_ADDED = gql`
-  subscription OnComponentAdded {
+  subscription OnComponentAdded($logType: String, $logOffset: Int, $logLimit: Int, $logHead: String, $logSort: String) {
     componentAdded {
       component {
         ...componentFields
@@ -78,7 +120,13 @@ const SUB_SUBSCRIPTION_ADDED = gql`
 `;
 
 const SUB_COMPONENT_CHANGED = gql`
-  subscription OnComponentChanged {
+  subscription OnComponentChanged(
+    $logType: String
+    $logOffset: Int
+    $logLimit: Int
+    $logHead: String
+    $logSort: String
+  ) {
     componentChanged {
       component {
         ...componentFields
@@ -98,13 +146,15 @@ const SUB_COMPONENT_REMOVED = gql`
   }
   ${componentIdFields}
 `;
-
+export type Filters = {
+  log?: { logType?: string; logOffset?: number; logLimit?: number; logHead?: string; logSort?: string };
+};
 /** provides data to component ui page, making sure both variables and return value are safely typed and memoized */
-export function useComponentQuery(componentId: string, host: string) {
+export function useComponentQuery(componentId: string, host: string, filters?: Filters) {
   const idRef = useRef(componentId);
   idRef.current = componentId;
-  const { data, error, loading, subscribeToMore } = useDataQuery(GET_COMPONENT, {
-    variables: { id: componentId, extensionId: host },
+  const { data, error, loading, subscribeToMore, ...rest } = useDataQuery(GET_COMPONENT, {
+    variables: { id: componentId, extensionId: host, ...(filters?.log || {}) },
   });
 
   useEffect(() => {
@@ -194,7 +244,13 @@ export function useComponentQuery(componentId: string, host: string) {
   const rawComponent = data?.getHost?.get;
   return useMemo(() => {
     const aspectList = {
-      entries: rawComponent?.aspects?.map((aspect) => ({ aspectId: aspect.id, aspectData: aspect.data })),
+      entries: rawComponent?.aspects.map((aspectObject) => {
+        return {
+          ...aspectObject,
+          aspectId: aspectObject.id,
+          aspectData: aspectObject.data,
+        };
+      }),
     };
     const id = rawComponent && ComponentID.fromObject(rawComponent.id);
     return {
@@ -206,6 +262,8 @@ export function useComponentQuery(componentId: string, host: string) {
         : !rawComponent && !loading
         ? new ComponentError(404)
         : undefined,
+      loading,
+      ...rest,
     };
   }, [rawComponent, host, error]);
 }

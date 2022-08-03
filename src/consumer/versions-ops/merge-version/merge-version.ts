@@ -1,4 +1,5 @@
 import chalk from 'chalk';
+import { compact } from 'lodash';
 import * as path from 'path';
 
 import { BitId, BitIds } from '../../../bit-id';
@@ -39,6 +40,7 @@ export type ApplyVersionResults = {
   resolvedComponents?: Component[]; // relevant for bit merge --resolve
   abortedComponents?: ApplyVersionResult[]; // relevant for bit merge --abort
   mergeSnapResults?: { snappedComponents: Component[]; autoSnappedResults: AutoTagResult[] } | null;
+  leftUnresolvedConflicts?: boolean;
 };
 type ComponentStatus = {
   componentFromFS: Component;
@@ -238,4 +240,45 @@ export function getMergeStrategy(ours: boolean, theirs: boolean, manual: boolean
   if (theirs) return MergeOptions.theirs as any;
   if (manual) return MergeOptions.manual as any;
   return null;
+}
+
+export const applyVersionReport = (components: ApplyVersionResult[], addName = true, showVersion = false): string => {
+  const tab = addName ? '\t' : '';
+  return components
+    .map((component: ApplyVersionResult) => {
+      const name = showVersion ? component.id.toString() : component.id.toStringWithoutVersion();
+      const files = Object.keys(component.filesStatus)
+        .map((file) => {
+          const note =
+            component.filesStatus[file] === FileStatus.manual
+              ? chalk.white(
+                  'automatic merge failed. please fix conflicts manually and then run "bit install" and "bit compile"'
+                )
+              : '';
+          return `${tab}${component.filesStatus[file]} ${chalk.bold(file)} ${note}`;
+        })
+        .join('\n');
+      return `${addName ? name : ''}\n${chalk.cyan(files)}`;
+    })
+    .join('\n\n');
+};
+
+export function conflictSummaryReport(components: ApplyVersionResult[]): string {
+  const tab = '\t';
+  return compact(
+    components.map((component: ApplyVersionResult) => {
+      const name = component.id.toStringWithoutVersion();
+      const files = compact(
+        Object.keys(component.filesStatus).map((file) => {
+          if (component.filesStatus[file] === FileStatus.manual) {
+            return `${tab}${component.filesStatus[file]} ${chalk.bold(file)}`;
+          }
+          return null;
+        })
+      );
+      if (!files.length) return null;
+
+      return `${name}\n${chalk.cyan(files.join('\n'))}`;
+    })
+  ).join('\n');
 }

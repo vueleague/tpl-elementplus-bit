@@ -9,7 +9,7 @@ import { Separator } from '@teambit/documenter.ui.separator';
 import styles from './aspect-page.module.scss';
 
 const GET_COMPONENT = gql`
-  query($id: String!) {
+  query ($id: String!) {
     getHost {
       get(id: $id) {
         aspects {
@@ -23,10 +23,11 @@ const GET_COMPONENT = gql`
   }
 `;
 
+// TODO: get the docs domain from the community aspect and pass it here as a prop
 export function AspectPage() {
   const component = useContext(ComponentContext);
   const { data } = useDataQuery(GET_COMPONENT, {
-    variables: { id: component.id._legacy.name },
+    variables: { id: component.id.toString() },
   });
   const aspectList = data?.getHost?.get?.aspects;
 
@@ -35,7 +36,7 @@ export function AspectPage() {
       <EmptyBox
         title="This component is new and doesn’t have any aspects."
         linkText="Learn more about component aspects"
-        link="https://harmony-docs.bit.dev/aspects/aspects-overview"
+        link={`https://bit.dev/docs/extending-bit/aspect-overview`}
       />
     );
   }
@@ -46,10 +47,10 @@ export function AspectPage() {
         <H1 className={styles.title}>Configuration</H1>
         <Separator className={styles.separator} />
         {aspectList &&
-          aspectList.map((aspect, index) => {
+          aspectList.map((aspect) => {
             return (
               <AspectBox
-                key={index}
+                key={aspect.id}
                 className={styles.aspectBox}
                 name={aspect.id}
                 icon={aspect.icon}

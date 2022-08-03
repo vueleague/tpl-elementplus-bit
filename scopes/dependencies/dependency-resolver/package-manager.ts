@@ -1,4 +1,5 @@
 import { PeerDependencyIssuesByProjects } from '@pnpm/core';
+import { PeerDependencyRules } from '@pnpm/types';
 import { ComponentMap } from '@teambit/component';
 import { Registries } from './registry';
 import { DepsFilterFn } from './manifest';
@@ -6,6 +7,8 @@ import { WorkspacePolicy } from './policy';
 import { NetworkConfig, ProxyConfig } from './dependency-resolver.main.runtime';
 
 export { PeerDependencyIssuesByProjects };
+
+export type PackageImportMethod = 'auto' | 'hardlink' | 'copy' | 'clone';
 
 export type PackageManagerInstallOptions = {
   cacheRootDir?: string;
@@ -25,6 +28,26 @@ export type PackageManagerInstallOptions = {
   overrides?: Record<string, string>;
 
   nodeLinker?: 'hoisted' | 'isolated';
+
+  packageManagerConfigRootDir?: string;
+
+  packageImportMethod?: PackageImportMethod;
+
+  rootComponents?: boolean;
+
+  rootComponentsForCapsules?: boolean;
+
+  useNesting?: boolean;
+
+  keepExistingModulesDir?: boolean;
+
+  sideEffectsCache?: boolean;
+
+  engineStrict?: boolean;
+
+  nodeVersion?: string;
+
+  peerDependencyRules?: PeerDependencyRules;
 };
 
 export type PackageManagerGetPeerDependencyIssuesOptions = PackageManagerInstallOptions;
@@ -39,6 +62,7 @@ export type ResolvedPackageVersion = {
 export type PackageManagerResolveRemoteVersionOptions = {
   rootDir: string;
   cacheRootDir?: string;
+  packageManagerConfigRootDir?: string;
   // fetchToCache?: boolean;
   // update?: boolean;
 };
@@ -52,7 +76,7 @@ export interface PackageManager {
     rootDir: string,
     rootPolicy: WorkspacePolicy,
     componentDirectoryMap: ComponentMap<string>,
-    options?: PackageManagerInstallOptions
+    options: PackageManagerInstallOptions
   ): Promise<void>;
 
   resolveRemoteVersion(
@@ -66,6 +90,8 @@ export interface PackageManager {
     componentDirectoryMap: ComponentMap<string>,
     options: PackageManagerGetPeerDependencyIssuesOptions
   ): Promise<PeerDependencyIssuesByProjects>;
+
+  getInjectedDirs?(rootDir: string, componentDir: string, packageName: string): Promise<string[]>;
 
   getRegistries?(): Promise<Registries>;
 

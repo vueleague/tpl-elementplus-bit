@@ -1,11 +1,10 @@
 import mapSeries from 'p-map-series';
 import * as path from 'path';
-import { IssuesClasses } from '@teambit/component-issues';
-import fs from 'fs-extra';
+import { ComponentIssue } from '@teambit/component-issues';
 import { BitId, BitIds } from '../../bit-id';
 import { createInMemoryCache } from '../../cache/cache-factory';
 import { getMaxSizeForComponents, InMemoryCache } from '../../cache/in-memory-cache';
-import { ANGULAR_PACKAGE_IDENTIFIER, BIT_MAP, DEFAULT_DIST_DIRNAME } from '../../constants';
+import { ANGULAR_PACKAGE_IDENTIFIER, BIT_MAP } from '../../constants';
 import logger from '../../logger/logger';
 import ScopeComponentsImporter from '../../scope/component-ops/scope-components-importer';
 import { ModelComponent } from '../../scope/models';
@@ -17,9 +16,13 @@ import Consumer from '../consumer';
 import { ComponentFsCache } from './component-fs-cache';
 import { updateDependenciesVersions } from './dependencies/dependency-resolver';
 import { DependenciesLoader } from './dependencies/dependency-resolver/dependencies-loader';
-import componentIdToPackageName from '../../utils/bit/component-id-to-package-name';
 
-type OnComponentLoadSubscriber = (component: Component) => Promise<Component>;
+export type ComponentLoadOptions = {
+  loadDocs?: boolean;
+  loadCompositions?: boolean;
+};
+type OnComponentLoadSubscriber = (component: Component, loadOpts?: ComponentLoadOptions) => Promise<Component>;
+type OnComponentIssuesCalcSubscriber = (component: Component) => Promise<ComponentIssue[]>;
 
 export default class ComponentLoader {
   private componentsCache: InMemoryCache<Component>; // cache loaded components
@@ -40,6 +43,11 @@ export default class ComponentLoader {
   static onComponentLoadSubscribers: OnComponentLoadSubscriber[] = [];
   static registerOnComponentLoadSubscriber(func: OnComponentLoadSubscriber) {
     this.onComponentLoadSubscribers.push(func);
+  }
+
+  static onComponentIssuesCalcSubscribers: OnComponentIssuesCalcSubscriber[] = [];
+  static registerOnComponentIssuesCalcSubscriber(func: OnComponentIssuesCalcSubscriber) {
+    this.onComponentIssuesCalcSubscribers.push(func);
   }
 
   clearComponentsCache() {
@@ -103,7 +111,8 @@ export default class ComponentLoader {
 
   async loadMany(
     ids: BitIds,
-    throwOnFailure = true
+    throwOnFailure = true,
+    loadOpts?: ComponentLoadOptions
   ): Promise<{ components: Component[]; invalidComponents: InvalidComponent[] }> {
     logger.debugAndAddBreadCrumb('ComponentLoader', 'loading consumer-components from the file-system, ids: {ids}', {
       ids: ids.toString(),
@@ -112,7 +121,7 @@ export default class ComponentLoader {
     const idsToProcess: BitId[] = [];
     const invalidComponents: InvalidComponent[] = [];
     ids.forEach((id: BitId) => {
-      if (!(id instanceof BitId)) {
+      if (id.constructor.name !== BitId.name) {
         throw new TypeError(`consumer.loadComponents expects to get BitId instances, instead, got "${typeof id}"`);
       }
       const idWithVersion: BitId = getLatestVersionNumber(this.consumer.bitmapIdsFromCurrentLane, id);
@@ -133,7 +142,7 @@ export default class ComponentLoader {
 
     const allComponents: Component[] = [];
     await mapSeries(idsToProcess, async (id: BitId) => {
-      const component = await this.loadOne(id, throwOnFailure, invalidComponents);
+      const component = await this.loadOne(id, throwOnFailure, invalidComponents, loadOpts);
       if (component) {
         this.componentsCache.set(component.id.toString(), component);
         logger.debugAndAddBreadCrumb('ComponentLoader', 'Finished loading the component "{id}"', {
@@ -146,7 +155,12 @@ export default class ComponentLoader {
     return { components: allComponents.concat(alreadyLoadedComponents), invalidComponents };
   }
 
-  private async loadOne(id: BitId, throwOnFailure: boolean, invalidComponents: InvalidComponent[]) {
+  private async loadOne(
+    id: BitId,
+    throwOnFailure: boolean,
+    invalidComponents: InvalidComponent[],
+    loadOpts?: ComponentLoadOptions
+  ) {
     const componentMap = this.consumer.bitMap.getComponent(id);
     let bitDir = this.consumer.getPath();
     if (componentMap.rootDir) {
@@ -176,12 +190,9 @@ export default class ComponentLoader {
       return handleError(err);
     }
     component.loadedFromFileSystem = true;
-    component.originallySharedDir = componentMap.originallySharedDir || undefined;
-    component.wrapDir = componentMap.wrapDir || undefined;
     // reload component map as it may be changed after calling Component.loadFromFileSystem()
     component.componentMap = this.consumer.bitMap.getComponent(id);
     await this._handleOutOfSyncScenarios(component);
-    await this.addComponentIssues(component);
 
     const loadDependencies = async () => {
       await this.invalidateDependenciesCacheIfNeeded();
@@ -196,9 +207,10 @@ export default class ComponentLoader {
 
     const runOnComponentLoadEvent = async () => {
       return mapSeries(ComponentLoader.onComponentLoadSubscribers, async (subscriber) => {
-        component = await subscriber(component);
+        component = await subscriber(component, loadOpts);
       });
     };
+
     try {
       await loadDependencies();
       await runOnComponentLoadEvent();
@@ -209,18 +221,13 @@ export default class ComponentLoader {
     return component;
   }
 
-  private async addComponentIssues(component: Component) {
-    if (this.consumer.isLegacy) return;
-    const pkgName = componentIdToPackageName(component);
-    const pkgDir = path.join(this.consumer.getPath(), 'node_modules', pkgName);
-    const distDir = path.join(pkgDir, DEFAULT_DIST_DIRNAME);
-    const distExists = await fs.pathExists(distDir);
-    if (distExists) return;
-    component.issues.getOrCreate(IssuesClasses.MissingDists).data = true;
-    const pkgDirExist = await fs.pathExists(pkgDir);
-    if (!pkgDirExist) {
-      component.issues.getOrCreate(IssuesClasses.MissingLinksFromNodeModulesToSrc).data = true;
-    }
+  private async runOnComponentIssuesCalcEvent(component: Component) {
+    return mapSeries(ComponentLoader.onComponentIssuesCalcSubscribers, async (subscriber) => {
+      const issues = await subscriber(component);
+      issues.forEach((issue) => {
+        component.issues.add(issue);
+      });
+    });
   }
 
   private async _handleOutOfSyncScenarios(component: Component) {

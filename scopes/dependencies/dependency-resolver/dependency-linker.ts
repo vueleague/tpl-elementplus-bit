@@ -1,3 +1,4 @@
+import isBuiltinModule from 'is-builtin-module';
 import path from 'path';
 import { uniq, compact, flatten, head } from 'lodash';
 import { Stats } from 'fs';
@@ -58,6 +59,11 @@ export type LinkingOptions = {
    * consumer is required for the legacyLink
    */
   consumer?: Consumer;
+
+  /**
+   * Link deps which should be linked to the env
+   */
+  linkDepsResolvedFromEnv?: boolean;
 };
 
 const DEFAULT_LINKING_OPTIONS: LinkingOptions = {
@@ -65,6 +71,7 @@ const DEFAULT_LINKING_OPTIONS: LinkingOptions = {
   rewire: false,
   linkTeambitBit: true,
   linkCoreAspects: true,
+  linkDepsResolvedFromEnv: true,
   linkNestedDepsInNM: true,
 };
 
@@ -154,9 +161,11 @@ export class DependencyLinker {
     }
 
     // Link deps which should be linked to the env
-    result.resolvedFromEnvLinks = await this.linkDepsResolvedFromEnv(componentDirectoryMap);
+    if (linkingOpts.linkDepsResolvedFromEnv) {
+      result.resolvedFromEnvLinks = await this.linkDepsResolvedFromEnv(componentDirectoryMap);
+    }
     if (linkingOpts.linkNestedDepsInNM) {
-      result.nestedDepsInNmLinks = await this.addSymlinkFromComponentDirNMToWorkspaceDirNM(
+      result.nestedDepsInNmLinks = this.addSymlinkFromComponentDirNMToWorkspaceDirNM(
         finalRootDir,
         componentDirectoryMap
       );
@@ -213,9 +222,11 @@ export class DependencyLinker {
   }
 
   /**
-   * add symlink from the node_modules in the component's root-dir to the workspace node-modules
+   * Add symlinks from the node_modules in the component's root-dir to the workspace node_modules
    * of the component. e.g.
-   * ws-root/node_modules/comp1/node_modules -> ws-root/components/comp1/node_modules
+   * <ws-root>/node_modules/comp1/node_modules/<dep> -> <ws-root>/components/comp1/node_modules/<dep>
+   * This is needed because the component is compiled into the dist folder at <ws-root>/node_modules/comp1/dist,
+   * so the files in the dist folder need to find the right dependencies of comp1.
    */
   private addSymlinkFromComponentDirNMToWorkspaceDirNM(
     rootDir: string,
@@ -234,13 +245,18 @@ export class DependencyLinker {
         .map((dirent) => {
           const dirPath = path.join(dir, dirent.name);
           const moduleName = parent ? `${parent}/${dirent.name}` : dirent.name;
+          // If we have a folder with a name of built in module (like events)
+          // the resolve from will resolve it from the core, so it will return something like 'events'
+          // instead of the path.
+          // adding a '/' at the end solve this
+          const moduleNameToResolve = isBuiltinModule(moduleName) ? `${moduleName}/` : moduleName;
           // This is a scoped package, need to go inside
           if (dirent.name.startsWith('@')) {
             return getPackagesFoldersToLink(dirPath, dirent.name);
           }
 
           if (dirent.isSymbolicLink()) {
-            const resolvedModuleFrom = resolveModuleFromDir(dir, moduleName);
+            const resolvedModuleFrom = resolveModuleFromDir(dir, moduleNameToResolve);
             if (!resolvedModuleFrom) {
               return {
                 moduleName,
@@ -619,6 +635,7 @@ function resolveModuleDirFromFile(resolvedModulePath: string, moduleId: string):
   }
 
   const [start, end] = resolvedModulePath.split('@');
+  if (!end) return path.basename(resolvedModulePath);
   const versionStr = head(end.split('/'));
   return `${start}@${versionStr}`;
 }

@@ -92,15 +92,12 @@ export class Publisher {
   }
 
   private async getComponentCapsules(componentIds: string[]): Promise<Capsule[]> {
-    const consumer = this.workspace.consumer;
-    if (consumer.isLegacy) {
-      // publish is supported on Harmony only
-      return [];
-    }
     const idsToPublish = await this.getIdsToPublish(componentIds);
     this.logger.debug(`total ${idsToPublish.length} to publish out of ${componentIds.length}`);
     const componentIdsToPublish = await this.workspace.resolveMultipleComponentIds(idsToPublish);
-    const network = await this.isolator.isolateComponents(componentIdsToPublish);
+    const network = await this.isolator.isolateComponents(componentIdsToPublish, {
+      packageManagerConfigRootDir: this.workspace.path,
+    });
     return network.seedersCapsules;
   }
 

@@ -1,9 +1,13 @@
+import fs from 'graceful-fs';
+import path from 'path';
 import semver from 'semver';
 import parsePackageName from 'parse-package-name';
 import defaultReporter from '@pnpm/default-reporter';
 import { streamParser } from '@pnpm/logger';
+import { read as readModulesState } from '@pnpm/modules-yaml';
 import { StoreController, WantedDependency } from '@pnpm/package-store';
 import { createOrConnectStoreController, CreateStoreControllerOptions } from '@pnpm/store-connection-manager';
+import sortPackages from '@pnpm/sort-packages';
 import {
   ResolvedPackageVersion,
   Registries,
@@ -22,10 +26,17 @@ import {
 import * as pnpm from '@pnpm/core';
 import createResolverAndFetcher, { ClientOptions } from '@pnpm/client';
 import pickRegistryForPackage from '@pnpm/pick-registry-for-package';
-import { ProjectManifest } from '@pnpm/types';
+import { PackageManifest, ProjectManifest } from '@pnpm/types';
 import { Logger } from '@teambit/logger';
 import toNerfDart from 'nerf-dart';
+import { promisify } from 'util';
+import pkgsGraph from 'pkgs-graph';
+import userHome from 'user-home';
+import { pnpmErrorToBitError } from './pnpm-error-to-bit-error';
 import { readConfig } from './read-config';
+
+const link = promisify(fs.link);
+const installsRunning: Record<string, Promise<any>> = {};
 
 type RegistriesMap = {
   default: string;
@@ -35,30 +46,34 @@ type RegistriesMap = {
 const STORE_CACHE: Record<string, { ctrl: StoreController; dir: string }> = {};
 
 async function createStoreController(
-  rootDir: string,
-  storeDir: string,
-  cacheDir: string,
-  registries: Registries,
-  proxyConfig: PackageManagerProxyConfig = {},
-  networkConfig: PackageManagerNetworkConfig = {}
+  options: {
+    rootDir: string;
+    storeDir: string;
+    cacheDir: string;
+    registries: Registries;
+    proxyConfig: PackageManagerProxyConfig;
+    networkConfig: PackageManagerNetworkConfig;
+  } & Pick<CreateStoreControllerOptions, 'packageImportMethod'>
 ): Promise<{ ctrl: StoreController; dir: string }> {
-  const authConfig = getAuthConfig(registries);
+  const authConfig = getAuthConfig(options.registries);
   const opts: CreateStoreControllerOptions = {
-    dir: rootDir,
-    cacheDir,
-    storeDir,
+    dir: options.rootDir,
+    cacheDir: options.cacheDir,
+    storeDir: options.storeDir,
     rawConfig: authConfig,
     verifyStoreIntegrity: true,
-    httpProxy: proxyConfig?.httpProxy,
-    httpsProxy: proxyConfig?.httpsProxy,
-    ca: proxyConfig?.ca,
-    cert: proxyConfig?.cert,
-    key: proxyConfig?.key,
-    localAddress: networkConfig?.localAddress,
-    noProxy: proxyConfig?.noProxy,
-    strictSsl: proxyConfig.strictSSL,
-    maxSockets: networkConfig.maxSockets,
-    networkConcurrency: networkConfig.networkConcurrency,
+    httpProxy: options.proxyConfig?.httpProxy,
+    httpsProxy: options.proxyConfig?.httpsProxy,
+    ca: options.networkConfig?.ca,
+    cert: options.networkConfig?.cert,
+    key: options.networkConfig?.key,
+    localAddress: options.networkConfig?.localAddress,
+    noProxy: options.proxyConfig?.noProxy,
+    strictSsl: options.networkConfig.strictSSL,
+    maxSockets: options.networkConfig.maxSockets,
+    networkConcurrency: options.networkConfig.networkConcurrency,
+    packageImportMethod: options.packageImportMethod,
+    pnpmHomeDir: path.join(userHome, '.pnpm'), // This is not actually used in our case
   };
   // We should avoid the recreation of store.
   // The store holds cache that makes subsequent resolutions faster.
@@ -84,12 +99,12 @@ async function generateResolverAndFetcher(
     cacheDir,
     httpProxy: proxyConfig?.httpProxy,
     httpsProxy: proxyConfig?.httpsProxy,
-    ca: proxyConfig?.ca,
-    cert: proxyConfig?.cert,
-    key: proxyConfig?.key,
+    ca: networkConfig?.ca,
+    cert: networkConfig?.cert,
+    key: networkConfig?.key,
     localAddress: networkConfig?.localAddress,
     noProxy: proxyConfig?.noProxy,
-    strictSsl: proxyConfig.strictSSL,
+    strictSsl: networkConfig.strictSSL,
     timeout: networkConfig.fetchTimeout,
     retry: {
       factor: networkConfig.fetchRetryFactor,
@@ -115,7 +130,7 @@ export async function getPeerDependencyIssues(
     proxyConfig: PackageManagerProxyConfig;
     networkConfig: PackageManagerNetworkConfig;
     overrides?: Record<string, string>;
-  }
+  } & Pick<CreateStoreControllerOptions, 'packageImportMethod'>
 ): Promise<PeerDependencyIssuesByProjects> {
   const projects: ProjectOptions[] = [];
   const workspacePackages = {};
@@ -132,14 +147,10 @@ export async function getPeerDependencyIssues(
     rootDir: rootManifest.rootDir,
   });
   const registriesMap = getRegistriesMap(opts.registries);
-  const storeController = await createStoreController(
-    rootManifest.rootDir,
-    opts.storeDir,
-    opts.cacheDir,
-    opts.registries,
-    opts.proxyConfig,
-    opts.networkConfig
-  );
+  const storeController = await createStoreController({
+    ...opts,
+    rootDir: rootManifest.rootDir,
+  });
   return pnpm.getPeerDependencyIssues(projects, {
     storeController: storeController.ctrl,
     storeDir: storeController.dir,
@@ -151,72 +162,79 @@ export async function getPeerDependencyIssues(
 
 export async function install(
   rootManifest,
-  manifestsByPaths,
+  manifestsByPaths: Record<string, ProjectManifest>,
   storeDir: string,
   cacheDir: string,
   registries: Registries,
   proxyConfig: PackageManagerProxyConfig = {},
   networkConfig: PackageManagerNetworkConfig = {},
-  options?: {
+  options: {
     nodeLinker?: 'hoisted' | 'isolated';
     overrides?: Record<string, string>;
-  } & Pick<InstallOptions, 'publicHoistPattern' | 'hoistPattern'>,
+    rootComponents?: boolean;
+    rootComponentsForCapsules?: boolean;
+  } & Pick<
+    InstallOptions,
+    'publicHoistPattern' | 'hoistPattern' | 'nodeVersion' | 'engineStrict' | 'peerDependencyRules'
+  > &
+    Pick<CreateStoreControllerOptions, 'packageImportMethod'>,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   logger?: Logger
 ) {
-  const packagesToBuild: MutatedProject[] = []; // @pnpm/core will use this to install the packages
-  const workspacePackages = {}; // @pnpm/core will use this to link packages to each other
-
-  // This will create local link by pnpm to a component exists in the ws.
-  // it will later deleted by the link process
-  // we keep it here to better support case like this:
-  // compA@1.0.0 uses compB@1.0.0
-  // I have compB@2.0.0 in my workspace
-  // now I install compA@1.0.0
-  // compA is hoisted to the root and install B@1.0.0 hoisted to the root as well
-  // now we will make link to B@2.0.0 and A will break
-  // with this we will have a link to the local B by pnpm so it will install B@1.0.0 inside A
-  // then when overriding the link, A will still works
-  // This is the rational behind not deleting this completely, but need further check that it really works
-
-  // eslint-disable-next-line
-  for (const rootDir in manifestsByPaths) {
-    const manifest = manifestsByPaths[rootDir];
-    packagesToBuild.push({
-      buildIndex: 0, // workspace components should be installed before the root
-      manifest,
-      rootDir,
-      mutation: 'install',
-    });
-    workspacePackages[manifest.name] = workspacePackages[manifest.name] || {};
-    workspacePackages[manifest.name][manifest.version] = { dir: rootDir, manifest };
+  if (!rootManifest.manifest.dependenciesMeta) {
+    rootManifest.manifest.dependenciesMeta = {};
   }
-  packagesToBuild.push({
-    buildIndex: 1, // install the root package after the workspace components were installed
-    manifest: rootManifest.manifest,
-    mutation: 'install',
-    rootDir: rootManifest.rootDir,
-  });
+  let readPackage: any;
+  let hoistingLimits = new Map();
+  if (options?.rootComponents) {
+    const { rootComponentWrappers, rootComponents } = createRootComponentWrapperManifests(
+      rootManifest.rootDir,
+      manifestsByPaths
+    );
+    manifestsByPaths = {
+      ...rootComponentWrappers,
+      ...manifestsByPaths,
+    };
+    readPackage = readPackageHook;
+    hoistingLimits = new Map();
+    hoistingLimits.set('.@', new Set(rootComponents));
+  } else if (options?.rootComponentsForCapsules) {
+    readPackage = readPackageHookForCapsules;
+  }
+  if (!manifestsByPaths[rootManifest.rootDir]) {
+    manifestsByPaths[rootManifest.rootDir] = rootManifest.manifest;
+  }
+  const { packagesToBuild, workspacePackages } = groupPkgs(manifestsByPaths);
   const registriesMap = getRegistriesMap(registries);
   const authConfig = getAuthConfig(registries);
-  const storeController = await createStoreController(
-    rootManifest.rootDir,
+  const storeController = await createStoreController({
+    rootDir: rootManifest.rootDir,
     storeDir,
     cacheDir,
     registries,
     proxyConfig,
-    networkConfig
-  );
+    networkConfig,
+    packageImportMethod: options?.packageImportMethod,
+  });
   const opts: InstallOptions = {
     storeDir: storeController.dir,
     dir: rootManifest.rootDir,
-    extendNodePath: false,
     storeController: storeController.ctrl,
     workspacePackages,
     preferFrozenLockfile: true,
+    pruneLockfileImporters: true,
+    modulesCacheMaxAge: 0,
     registries: registriesMap,
     rawConfig: authConfig,
+    hooks: { readPackage },
+    hoistingLimits,
+    strictPeerDependencies: false,
     ...options,
+    peerDependencyRules: {
+      allowAny: ['*'],
+      ignoreMissing: ['*'],
+      ...options?.peerDependencyRules,
+    },
   };
 
   const stopReporting = defaultReporter({
@@ -230,10 +248,197 @@ export async function install(
     streamParser,
   });
   try {
-    await mutateModules(packagesToBuild, opts);
+    await installsRunning[rootManifest.rootDir];
+    installsRunning[rootManifest.rootDir] = mutateModules(packagesToBuild, opts);
+    await installsRunning[rootManifest.rootDir];
+    delete installsRunning[rootManifest.rootDir];
+  } catch (err: any) {
+    throw pnpmErrorToBitError(err);
   } finally {
     stopReporting();
   }
+  if (options.rootComponents) {
+    const modulesState = await readModulesState(path.join(rootManifest.rootDir, 'node_modules'));
+    if (modulesState?.injectedDeps) {
+      await linkManifestsToInjectedDeps({
+        injectedDeps: modulesState.injectedDeps,
+        manifestsByPaths,
+        rootDir: rootManifest.rootDir,
+      });
+    }
+  }
+}
+
+/**
+ * This function creates manifests for root component wrappers.
+ * Root component wrappers are used to isolated workspace components with their workspace dependencies
+ * and peer dependencies.
+ * A root component wrapper has the wrapped component in the dependencies and any of its peer dependencies.
+ * This way pnpm will install the wrapped component in isolation from other components and their dependencies.
+ */
+function createRootComponentWrapperManifests(rootDir: string, manifestsByPaths: Record<string, ProjectManifest>) {
+  const rootComponentWrappers: Record<string, ProjectManifest> = {};
+  const rootComponents: string[] = [];
+  for (const manifest of Object.values(manifestsByPaths)) {
+    const name = manifest.name!.toString(); // eslint-disable-line
+    const compDir = path.join(rootDir, 'node_modules', name);
+    const id = path.relative(rootDir, compDir).replace(/\\/g, '/');
+    rootComponents.push(encodeURIComponent(id));
+    rootComponentWrappers[compDir] = {
+      name: `${name}__root`,
+      dependencies: {
+        [name]: `workspace:*`,
+        ...manifest.peerDependencies,
+        ...manifest['defaultPeerDependencies'], // eslint-disable-line
+      },
+      dependenciesMeta: {
+        [name]: { injected: true },
+      },
+    };
+  }
+  return {
+    rootComponentWrappers,
+    rootComponents,
+  };
+}
+
+/**
+ * This hook is used when installation is executed inside a capsule.
+ * The components in the capsules should get their peer dependencies installed,
+ * so this hook converts any peer dependencies into runtime dependencies.
+ * Also, any local dependencies are extended with the "injected" option,
+ * this tells pnpm to hard link the packages instead of symlinking them.
+ */
+function readPackageHookForCapsules(pkg: PackageManifest, workspaceDir?: string): PackageManifest {
+  // workspaceDir is set only for workspace packages
+  if (workspaceDir) {
+    return readDependencyPackageHook({
+      ...pkg,
+      dependencies: {
+        ...pkg.dependencies,
+        ...pkg.peerDependencies,
+        ...pkg['defaultPeerDependencies'], // eslint-disable-line
+      },
+    });
+  }
+  return readDependencyPackageHook(pkg);
+}
+
+/**
+ * This hook is used when installation happens in a Bit workspace.
+ * We need a different hook for this case because unlike in a capsule, in a workspace,
+ * the package manager only links workspace components to subdependencies.
+ * For direct dependencies, Bit's linking is used.
+ */
+function readPackageHook(pkg: PackageManifest, workspaceDir?: string): PackageManifest {
+  if (!pkg.dependencies || pkg.name?.endsWith(`__root`)) {
+    return pkg;
+  }
+  // workspaceDir is set only for workspace packages
+  if (workspaceDir) {
+    return readWorkspacePackageHook(pkg);
+  }
+  return readDependencyPackageHook(pkg);
+}
+
+/**
+ * This hook adds the "injected" option to any workspace dependency.
+ * The injected option tell pnpm to hard link the packages instead of symlinking them.
+ */
+function readDependencyPackageHook(pkg: PackageManifest): PackageManifest {
+  const dependenciesMeta = pkg.dependenciesMeta ?? {};
+  for (const [name, version] of Object.entries(pkg.dependencies ?? {})) {
+    if (version.startsWith('workspace:')) {
+      // This instructs pnpm to hard link the component from the workspace, not symlink it.
+      dependenciesMeta[name] = { injected: true };
+    }
+  }
+  return {
+    ...pkg,
+    dependenciesMeta,
+  };
+}
+
+/**
+ * This hook is used when installation happens in a Bit workspace.
+ * It is applied on workspace projects, and it removes any references to other workspace projects.
+ * This is needed because Bit has its own linking for workspace projects.
+ * pnpm should not override the links created by Bit.
+ * Otherwise, the IDE would reference workspace projects from inside `node_modules/.pnpm`.
+ */
+function readWorkspacePackageHook(pkg: PackageManifest): PackageManifest {
+  const newDeps = {};
+  for (const [name, version] of Object.entries(pkg.dependencies ?? {})) {
+    if (!version.startsWith('workspace:')) {
+      newDeps[name] = version;
+    }
+  }
+  return {
+    ...pkg,
+    dependencies: newDeps,
+  };
+}
+
+/*
+ * The package.json files of the components are generated into node_modules/<component pkg name>/package.json
+ * This function copies the generated package.json file into all the locations of the component.
+ */
+async function linkManifestsToInjectedDeps({
+  rootDir,
+  manifestsByPaths,
+  injectedDeps,
+}: {
+  rootDir: string;
+  manifestsByPaths: Record<string, ProjectManifest>;
+  injectedDeps: Record<string, string[]>;
+}) {
+  await Promise.all(
+    Object.entries(injectedDeps).map(async ([compDir, targetDirs]) => {
+      const pkgName = manifestsByPaths[path.join(rootDir, compDir)]?.name;
+      if (!pkgName) return;
+      const pkgJsonPath = path.join(rootDir, 'node_modules', pkgName, 'package.json');
+      if (fs.existsSync(pkgJsonPath)) {
+        await Promise.all(targetDirs.map((targetDir) => link(pkgJsonPath, path.join(targetDir, 'package.json'))));
+      }
+    })
+  );
+}
+
+function groupPkgs(manifestsByPaths: Record<string, ProjectManifest>) {
+  const pkgs = Object.entries(manifestsByPaths).map(([dir, manifest]) => ({ dir, manifest }));
+  const { graph } = pkgsGraph(pkgs);
+  const chunks = sortPackages(graph as any);
+
+  // This will create local link by pnpm to a component exists in the ws.
+  // it will later deleted by the link process
+  // we keep it here to better support case like this:
+  // compA@1.0.0 uses compB@1.0.0
+  // I have compB@2.0.0 in my workspace
+  // now I install compA@1.0.0
+  // compA is hoisted to the root and install B@1.0.0 hoisted to the root as well
+  // now we will make link to B@2.0.0 and A will break
+  // with this we will have a link to the local B by pnpm so it will install B@1.0.0 inside A
+  // then when overriding the link, A will still works
+  // This is the rational behind not deleting this completely, but need further check that it really works
+  const packagesToBuild: MutatedProject[] = []; // @pnpm/core will use this to install the packages
+  const workspacePackages = {}; // @pnpm/core will use this to link packages to each other
+
+  chunks.forEach((dirs, buildIndex) => {
+    for (const rootDir of dirs) {
+      const manifest = manifestsByPaths[rootDir];
+      packagesToBuild.push({
+        buildIndex,
+        manifest,
+        rootDir,
+        mutation: 'install',
+      });
+      if (manifest.name) {
+        workspacePackages[manifest.name] = workspacePackages[manifest.name] || {};
+        workspacePackages[manifest.name][manifest.version] = { dir: rootDir, manifest };
+      }
+    }
+  });
+  return { packagesToBuild, workspacePackages };
 }
 
 export async function resolveRemoteVersion(
@@ -270,7 +475,7 @@ export async function resolveRemoteVersion(
     };
   } catch (e: any) {
     if (!e.message?.includes('is not a valid string')) {
-      throw e;
+      throw pnpmErrorToBitError(e);
     }
     // The provided package is probably a git url or path to a folder
     const wantedDep: WantedDependency = {

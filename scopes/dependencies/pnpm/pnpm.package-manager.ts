@@ -16,9 +16,10 @@ import {
   PackageManagerNetworkConfig,
 } from '@teambit/dependency-resolver';
 import { Logger } from '@teambit/logger';
-import { memoize, omit } from 'lodash';
+import { memoize, omit, fromPairs } from 'lodash';
 import { PkgMain } from '@teambit/pkg';
 import { PeerDependencyIssuesByProjects } from '@pnpm/core';
+import { read as readModulesState } from '@pnpm/modules-yaml';
 import { ProjectManifest } from '@pnpm/types';
 import { join } from 'path';
 import userHome from 'user-home';
@@ -78,9 +79,15 @@ export class PnpmPackageManager implements PackageManager {
     };
   }
 
-  _getGlobalPnpmDirs(cacheRootDir?: string) {
-    const storeDir = cacheRootDir ? join(cacheRootDir, '.pnpm-store') : defaultStoreDir;
-    const cacheDir = cacheRootDir ? join(cacheRootDir, '.pnpm-cache') : defaultCacheDir;
+  async _getGlobalPnpmDirs(
+    opts: {
+      cacheRootDir?: string;
+      packageManagerConfigRootDir?: string;
+    } = {}
+  ) {
+    const { config } = await this.readConfig(opts.packageManagerConfigRootDir);
+    const storeDir = opts.cacheRootDir ? join(opts.cacheRootDir, '.pnpm-store') : config.storeDir ?? defaultStoreDir;
+    const cacheDir = opts.cacheRootDir ? join(opts.cacheRootDir, '.pnpm-cache') : config.cacheDir ?? defaultCacheDir;
     return { storeDir, cacheDir };
   }
 
@@ -108,9 +115,11 @@ export class PnpmPackageManager implements PackageManager {
     const registries = await this.depResolver.getRegistries();
     const proxyConfig = await this.depResolver.getProxyConfig();
     const networkConfig = await this.depResolver.getNetworkConfig();
-    const { storeDir, cacheDir } = this._getGlobalPnpmDirs(installOptions?.cacheRootDir);
-    const { config } = await this.readConfig();
-    await extendWithComponentsFromDir(rootManifest.rootDir, componentsManifests);
+    const { storeDir, cacheDir } = await this._getGlobalPnpmDirs(installOptions);
+    const { config } = await this.readConfig(installOptions.packageManagerConfigRootDir);
+    if (!installOptions.useNesting) {
+      await extendWithComponentsFromDir(rootManifest.rootDir, componentsManifests);
+    }
     await install(
       rootManifest,
       componentsManifests,
@@ -120,10 +129,18 @@ export class PnpmPackageManager implements PackageManager {
       proxyConfig,
       networkConfig,
       {
+        engineStrict: installOptions.engineStrict ?? config.engineStrict,
         nodeLinker: installOptions.nodeLinker,
+        nodeVersion: installOptions.nodeVersion ?? config.nodeVersion,
         overrides: installOptions.overrides,
         hoistPattern: config.hoistPattern,
         publicHoistPattern: ['*eslint*', '@prettier/plugin-*', '*prettier-plugin-*'],
+        packageImportMethod: installOptions.packageImportMethod ?? config.packageImportMethod,
+        rootComponents: installOptions.rootComponents,
+        rootComponentsForCapsules: installOptions.rootComponentsForCapsules,
+        peerDependencyRules: installOptions.peerDependencyRules,
+        sideEffectsCacheRead: installOptions.sideEffectsCache ?? true,
+        sideEffectsCacheWrite: installOptions.sideEffectsCache ?? true,
       },
       this.logger
     );
@@ -139,7 +156,7 @@ export class PnpmPackageManager implements PackageManager {
     componentDirectoryMap: ComponentMap<string>,
     installOptions: PackageManagerInstallOptions = {}
   ): Promise<PeerDependencyIssuesByProjects> {
-    const { storeDir, cacheDir } = this._getGlobalPnpmDirs(installOptions?.cacheRootDir);
+    const { storeDir, cacheDir } = await this._getGlobalPnpmDirs(installOptions);
     const proxyConfig = await this.depResolver.getProxyConfig();
     const networkConfig = await this.depResolver.getNetworkConfig();
     const registries = await this.depResolver.getRegistries();
@@ -152,6 +169,7 @@ export class PnpmPackageManager implements PackageManager {
       componentDirectoryMap,
       installOptions
     );
+    const { config } = await this.readConfig();
     return lynx.getPeerDependencyIssues(rootManifest, componentsManifests, {
       storeDir,
       cacheDir,
@@ -159,6 +177,7 @@ export class PnpmPackageManager implements PackageManager {
       registries,
       networkConfig,
       overrides: installOptions.overrides,
+      packageImportMethod: installOptions.packageImportMethod ?? config.packageImportMethod,
     });
   }
 
@@ -169,8 +188,12 @@ export class PnpmPackageManager implements PackageManager {
   ): Record<string, ProjectManifest> {
     return componentDirectoryMap.toArray().reduce((acc, [component, dir]) => {
       const packageName = this.pkg.getPackageName(component);
-      if (componentsManifestsFromWorkspace.has(packageName)) {
-        acc[dir] = componentsManifestsFromWorkspace.get(packageName)?.toJson({ copyPeerToRuntime });
+      const manifest = componentsManifestsFromWorkspace.get(packageName);
+      if (manifest) {
+        acc[dir] = manifest.toJson({ copyPeerToRuntime });
+        acc[dir].defaultPeerDependencies = fromPairs(
+          manifest.envPolicy.peersAutoDetectPolicy.entries.map(({ name, version }) => [name, version])
+        );
       }
       return acc;
     }, {});
@@ -183,7 +206,7 @@ export class PnpmPackageManager implements PackageManager {
     // require it dynamically for performance purpose. the pnpm package require many files - do not move to static import
     // eslint-disable-next-line global-require, import/no-dynamic-require
     const { resolveRemoteVersion } = require('./lynx');
-    const cacheDir = options?.cacheRootDir ? join(options?.cacheRootDir, '.pnpm-cache') : defaultStoreDir;
+    const { cacheDir } = await this._getGlobalPnpmDirs(options);
     const registries = await this.depResolver.getRegistries();
     const proxyConfig = await this.depResolver.getProxyConfig();
     const networkConfig = await this.depResolver.getNetworkConfig();
@@ -199,13 +222,21 @@ export class PnpmPackageManager implements PackageManager {
 
   async getNetworkConfig?(): Promise<PackageManagerNetworkConfig> {
     const { config } = await this.readConfig();
+    // We need to use config.rawConfig as it will only contain the settings defined by the user.
+    // config contains default values of the settings when they are not defined by the user.
     return {
-      maxSockets: config.maxSockets,
-      networkConcurrency: config.networkConcurrency,
-      fetchRetries: config.fetchRetries,
-      fetchTimeout: config.fetchTimeout,
-      fetchRetryMaxtimeout: config.fetchRetryMaxtimeout,
-      fetchRetryMintimeout: config.fetchRetryMintimeout,
+      maxSockets: config.rawConfig['max-sockets'],
+      networkConcurrency: config.rawConfig['network-concurrency'],
+      fetchRetries: config.rawConfig['fetch-retries'],
+      fetchTimeout: config.rawConfig['fetch-timeout'],
+      fetchRetryMaxtimeout: config.rawConfig['fetch-retry-maxtimeout'],
+      fetchRetryMintimeout: config.rawConfig['fetch-retry-mintimeout'],
+      strictSSL: config.rawConfig['strict-ssl'],
+      // These settings don't have default value, so it is safe to read them from config
+      // ca is automatically populated from the content of the file specified by cafile.
+      ca: config.ca,
+      cert: config.cert,
+      key: config.key,
     };
   }
 
@@ -242,5 +273,10 @@ export class PnpmPackageManager implements PackageManager {
     }
 
     return new Registries(defaultRegistry, scopesRegistries);
+  }
+
+  async getInjectedDirs(rootDir: string, componentDir: string): Promise<string[]> {
+    const modulesState = await readModulesState(join(rootDir, 'node_modules'));
+    return modulesState?.injectedDeps?.[componentDir] ?? [];
   }
 }

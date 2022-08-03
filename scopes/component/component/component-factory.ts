@@ -8,6 +8,17 @@ import { Component, InvalidComponent } from './component';
 import { State } from './state';
 import { Snap } from './snap';
 
+export type ResolveAspectsOptions = {
+  /**
+   * Do not return results for the core aspects
+   */
+  excludeCore?: boolean;
+  /**
+   * Only return results for the provided list of ids
+   */
+  requestedOnly?: boolean;
+};
+
 export interface ComponentFactory {
   /**
    * name of the component host.
@@ -57,7 +68,7 @@ export interface ComponentFactory {
 
   getLegacyGraph(ids?: ComponentID[]): Promise<LegacyGraph>;
 
-  getLogs(id: ComponentID): Promise<ComponentLog[]>;
+  getLogs(id: ComponentID, shortHash?: boolean, startsFrom?: string): Promise<ComponentLog[]>;
 
   /**
    * returns a specific state of a component by hash or semver.
@@ -73,12 +84,16 @@ export interface ComponentFactory {
    * load aspects.
    * returns the loaded aspect ids including the loaded versions.
    */
-  loadAspects: (ids: string[], throwOnError?: boolean, neededFor?: ComponentID) => Promise<string[]>;
+  loadAspects: (ids: string[], throwOnError?: boolean, neededFor?: string) => Promise<string[]>;
 
   /**
    * Resolve dirs for aspects
    */
-  resolveAspects: (runtimeName?: string, componentIds?: ComponentID[]) => Promise<AspectDefinition[]>;
+  resolveAspects: (
+    runtimeName?: string,
+    componentIds?: ComponentID[],
+    opts?: ResolveAspectsOptions
+  ) => Promise<AspectDefinition[]>;
 
   /**
    * list all components in the host.
@@ -92,6 +107,13 @@ export interface ComponentFactory {
 
   listIds(): Promise<ComponentID[]>;
 
+  /**
+   * get component-ids matching the given pattern. a pattern can have multiple patterns separated by a comma.
+   * it uses multimatch (https://www.npmjs.com/package/multimatch) package for the matching algorithm, which supports
+   * (among others) negate character "!" to exclude ids. See the package page for more supported characters.
+   */
+  idsByPattern(pattern: string, throwForNoMatch?: boolean): Promise<ComponentID[]>;
+
   hasId(componentId: ComponentID): Promise<boolean>;
 
   /**
@@ -99,6 +121,19 @@ export interface ComponentFactory {
    * @param componentId
    */
   hasIdNested(componentId: ComponentID, includeCache?: boolean): Promise<boolean>;
+
+  /**
+   * whether a component is not the same as its head.
+   * for a new component, it'll return "true" as it has no head yet.
+   * this is relevant for component from the workspace, where it can be locally changed. on the scope it's always false
+   */
+  isModified(component: Component): Promise<boolean>;
+
+  /**
+   * write the component to the filesystem when applicable (no-op for scope).
+   * to change the component-path, specify the "rootPath", which should be a relative path inside the workspace.
+   */
+  write(component: Component, rootPath?: string): Promise<void>;
 
   /**
    * determine whether host should be the prior one in case multiple hosts persist.

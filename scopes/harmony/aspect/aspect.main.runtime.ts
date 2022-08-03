@@ -1,6 +1,8 @@
 import { AspectLoaderAspect, AspectLoaderMain } from '@teambit/aspect-loader';
+import mergeDeepLeft from 'ramda/src/mergeDeepLeft';
 import { BuilderAspect, BuilderMain } from '@teambit/builder';
 import { compact } from 'lodash';
+import { EnvPolicyConfigObject } from '@teambit/dependency-resolver';
 import { BitError } from '@teambit/bit-error';
 import { CLIAspect, CLIMain, MainRuntime } from '@teambit/cli';
 import { Environment, EnvsAspect, EnvsMain, EnvTransformer } from '@teambit/envs';
@@ -8,6 +10,7 @@ import { ReactAspect, ReactMain } from '@teambit/react';
 import { GeneratorAspect, GeneratorMain } from '@teambit/generator';
 import { BabelAspect, BabelMain } from '@teambit/babel';
 import { ComponentID } from '@teambit/component-id';
+import { AspectList } from '@teambit/component';
 import WorkspaceAspect, { ExtensionsOrigin, Workspace } from '@teambit/workspace';
 import { CompilerAspect, CompilerMain } from '@teambit/compiler';
 import { AspectAspect } from './aspect.aspect';
@@ -45,6 +48,10 @@ export class AspectMain {
       })
     );
     return results;
+  }
+
+  get babelConfig() {
+    return babelConfig;
   }
 
   private async getAspectNamesForComponent(id: ComponentID): Promise<AspectSource[]> {
@@ -101,12 +108,32 @@ export class AspectMain {
     return componentIds;
   }
 
-  async getAspectsOfComponent(id: string | ComponentID) {
+  /**
+   * returns all aspects info of a component, include the config and the data.
+   */
+  async getAspectsOfComponent(id: string | ComponentID): Promise<AspectList> {
+    if (typeof id === 'string') {
+      id = await this.workspace.resolveComponentId(id);
+    }
+    const component = await this.workspace.get(id);
+    return component.state.aspects;
+  }
+
+  /**
+   * helps debugging why/how an aspect was set to a component
+   */
+  async getAspectsOfComponentForDebugging(id: string | ComponentID) {
     if (typeof id === 'string') {
       id = await this.workspace.resolveComponentId(id);
     }
     const componentFromScope = await this.workspace.scope.get(id);
-    return this.workspace.componentExtensions(id, componentFromScope);
+    const { extensions, beforeMerge } = await this.workspace.componentExtensions(id, componentFromScope);
+    const component = await this.workspace.get(id);
+    return {
+      aspects: component.state.aspects,
+      extensions,
+      beforeMerge,
+    };
   }
 
   async updateAspectsToComponents(aspectId: string, pattern?: string): Promise<ComponentID[]> {
@@ -128,13 +155,27 @@ export class AspectMain {
         const aspect = comp.state.aspects.get(aspectCompId.toStringWithoutVersion());
         if (!aspect) return undefined;
         if (aspect.id.version === aspectCompId.version) return undefined; // nothing to update
-        await this.workspace.removeSpecificComponentConfig(comp.id, aspect.id.toString(), true);
+        // don't mark with minus if not exist in .bitmap. it's not needed. when the component is loaded, the
+        // merge-operation of the aspects removes duplicate aspect-id with different versions.
+        await this.workspace.removeSpecificComponentConfig(comp.id, aspect.id.toString(), false);
         await this.workspace.addSpecificComponentConfig(comp.id, aspectCompId.toString(), aspect.config);
         return comp.id;
       })
     );
     await this.workspace.bitMap.write();
     return compact(updatedComponentIds);
+  }
+
+  /**
+   * override the dependency configuration of the component environment.
+   */
+  overrideDependencies(dependencyPolicy: EnvPolicyConfigObject) {
+    return this.envs.override({
+      getDependencies: async () => {
+        const reactDeps = await this.aspectEnv.getDependencies();
+        return mergeDeepLeft(dependencyPolicy, reactDeps);
+      },
+    });
   }
 
   static runtime = MainRuntime;
@@ -180,11 +221,11 @@ export class AspectMain {
         .setShouldCopyNonSupportedFiles(false);
       return config;
     };
-    const tsCompiler = react.env.getCompiler([transformer]);
+    const tsCompiler = react.env.getCjsCompilerTask([transformer]);
 
     const compilerTasksOverride = react.overrideCompilerTasks([
       compiler.createTask('BabelCompiler', babelCompiler),
-      compiler.createTask('TypescriptCompiler', tsCompiler),
+      tsCompiler,
     ]);
 
     const aspectEnv = react.compose(

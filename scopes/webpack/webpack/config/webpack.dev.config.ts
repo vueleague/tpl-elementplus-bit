@@ -26,7 +26,8 @@ export function configFactory(
   publicRoot: string,
   publicPath: string,
   pubsub: PubsubMain,
-  title?: string
+  title?: string,
+  favicon?: string
 ): WebpackConfigWithDevServer {
   const resolveWorkspacePath = (relativePath) => path.resolve(workspaceDir, relativePath);
 
@@ -139,6 +140,7 @@ export function configFactory(
 
     resolve: {
       extensions: ['.ts', '.tsx', '.js', '.mdx', '.md'],
+      // TODO - check - we shoult not need both fallbacks and alias and provider plugin
       alias: fallbacksAliases,
 
       fallback: fallbacks as any,
@@ -148,8 +150,8 @@ export function configFactory(
       new HtmlWebpackPlugin({
         templateContent: html(title || 'Component preview'),
         filename: 'index.html',
+        favicon,
       }),
-
       new webpack.ProvidePlugin(fallbacksProvidePluginConfig),
 
       new WebpackBitReporterPlugin({

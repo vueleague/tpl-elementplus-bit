@@ -1,5 +1,6 @@
 import { useQuery, useSubscription, gql } from '@apollo/client';
 import { ComponentContext } from '@teambit/component';
+import { useQuery as useRouterQuery } from '@teambit/ui-foundation.ui.react-router.use-query';
 import { H1 } from '@teambit/documenter.ui.heading';
 import { Separator } from '@teambit/design.ui.separator';
 import { EmptyBox } from '@teambit/design.ui.empty-box';
@@ -69,10 +70,20 @@ type TestsPageProps = {
 } & HTMLAttributes<HTMLDivElement>;
 
 export function TestsPage({ className, emptyState }: TestsPageProps) {
+  const query = useRouterQuery();
+
   const component = useContext(ComponentContext);
-  const onTestsChanged = useSubscription(TESTS_SUBSCRIPTION_CHANGED, { variables: { id: component.id.toString() } });
+
+  const queryHasVersion = query.get('version');
+
+  const id = queryHasVersion ? component.id.toString() : component.id.toStringWithoutVersion();
+
+  const onTestsChanged = useSubscription(TESTS_SUBSCRIPTION_CHANGED, {
+    variables: { id },
+  });
+
   const { data } = useQuery(GET_COMPONENT, {
-    variables: { id: component.id._legacy.name },
+    variables: { id },
   });
 
   const testData = onTestsChanged.data?.testsChanged || data?.getHost?.getTests;
@@ -108,12 +119,13 @@ export function TestsPage({ className, emptyState }: TestsPageProps) {
     );
   }
 
+  // TODO: get the docs domain from the community aspect and pass it here as a prop
   if (testResults === null || testData?.testsResults === null) {
     return (
       <EmptyBox
         title="This component doesn’t have any tests."
         linkText="Learn how to add tests to your components"
-        link="https://harmony-docs.bit.dev/testing/overview/"
+        link={`https://bit.dev/docs/dev-services-overview/tester/tester-overview`}
       />
     );
   }

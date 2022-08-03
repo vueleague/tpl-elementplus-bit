@@ -113,7 +113,7 @@ export class TesterService implements EnvService<Tests, TesterDescriptor> {
 
     if (testCount === 0 && !options.ui) {
       this.logger.consoleWarning(`no tests found for environment ${chalk.cyan(context.id)}\n`);
-      return { components: [] };
+      return new Tests([]);
     }
 
     if (!options.ui)
@@ -125,6 +125,14 @@ export class TesterService implements EnvService<Tests, TesterDescriptor> {
       return componentPatterns.map((pattern: string) => ({ path: resolve(dir, pattern), relative: pattern }));
     });
 
+    let additionalHostDependencies = [];
+    if (
+      context.env.getAdditionalTestHostDependencies &&
+      typeof context.env.getAdditionalTestHostDependencies === 'function'
+    ) {
+      additionalHostDependencies = await context.env.getAdditionalTestHostDependencies();
+    }
+
     const testerContext = Object.assign(context, {
       release: false,
       specFiles,
@@ -135,6 +143,7 @@ export class TesterService implements EnvService<Tests, TesterDescriptor> {
       watch: options.watch,
       ui: options.ui,
       coverage: options.coverage,
+      additionalHostDependencies,
     });
 
     if (options.watch && options.ui && tester.watch) {

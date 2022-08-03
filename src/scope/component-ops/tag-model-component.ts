@@ -1,31 +1,28 @@
 import mapSeries from 'p-map-series';
 import R from 'ramda';
-import { isNilOrEmpty, compact } from 'ramda-adjunct';
-import pMap from 'p-map';
+import { isEmpty, compact } from 'lodash';
 import { ReleaseType } from 'semver';
 import { v4 } from 'uuid';
 import * as globalConfig from '../../api/consumer/lib/global-config';
 import { Scope } from '..';
 import { BitId, BitIds } from '../../bit-id';
 import loader from '../../cli/loader';
-import { BuildStatus, CFG_USER_EMAIL_KEY, CFG_USER_NAME_KEY, COMPONENT_ORIGINS, Extensions } from '../../constants';
+import { BuildStatus, CFG_USER_EMAIL_KEY, CFG_USER_NAME_KEY, Extensions } from '../../constants';
 import { CURRENT_SCHEMA } from '../../consumer/component/component-schema';
 import Component from '../../consumer/component/consumer-component';
 import Consumer from '../../consumer/consumer';
-import { ComponentSpecsFailed, NewerVersionFound } from '../../consumer/exceptions';
+import { NewerVersionFound } from '../../consumer/exceptions';
 import ShowDoctorError from '../../error/show-doctor-error';
-import ValidationError from '../../error/validation-error';
 import logger from '../../logger/logger';
-import { pathJoinLinux, sha1 } from '../../utils';
-import { PathLinux } from '../../utils/path';
+import { sha1 } from '../../utils';
 import { AutoTagResult, getAutoTagInfo } from './auto-tag';
 import { FlattenedDependenciesGetter } from './get-flattened-dependencies';
 import { getValidVersionOrReleaseType } from '../../utils/semver-helper';
 import { LegacyOnTagResult } from '../scope';
 import { Log } from '../models/version';
 import { BasicTagParams } from '../../api/consumer/lib/tag';
-import { concurrentComponentsLimit } from '../../utils/concurrency';
 import { MessagePerComponent, MessagePerComponentFetcher } from './message-per-component';
+import { ModelComponent } from '../models';
 
 export type onTagIdTransformer = (id: BitId) => BitId | null;
 type UpdateDependenciesOnTagFunc = (component: Component, idTransformer: onTagIdTransformer) => Component;
@@ -77,7 +74,8 @@ async function setFutureVersions(
   autoTagIds: BitIds,
   ids: BitIds,
   incrementBy?: number,
-  preRelease?: string
+  preRelease?: string,
+  soft?: boolean
 ): Promise<void> {
   await Promise.all(
     componentsToTag.map(async (componentToTag) => {
@@ -94,88 +92,34 @@ async function setFutureVersions(
           componentToTag.componentMap?.nextVersion?.preRelease
         );
       } else if (isAutoTag) {
-        componentToTag.version = modelComponent.getVersionToAdd('patch', undefined, incrementBy, preRelease); // auto-tag always bumped as patch
+        // auto-tag always bumped as patch
+        componentToTag.version = soft
+          ? 'patch'
+          : modelComponent.getVersionToAdd('patch', undefined, incrementBy, preRelease);
       } else {
-        const enteredId = ids.searchWithoutVersion(componentToTag.id);
-        if (enteredId && enteredId.hasVersion()) {
-          const exactVersionOrReleaseType = getValidVersionOrReleaseType(enteredId.version as string);
-          componentToTag.version = modelComponent.getVersionToAdd(
-            exactVersionOrReleaseType.releaseType,
-            exactVersionOrReleaseType.exactVersion
-          );
-        } else {
-          componentToTag.version = modelComponent.getVersionToAdd(releaseType, exactVersion, incrementBy, preRelease);
-        }
+        const versionByEnteredId = getVersionByEnteredId(ids, componentToTag, modelComponent);
+        componentToTag.version = soft
+          ? versionByEnteredId || exactVersion || releaseType
+          : versionByEnteredId || modelComponent.getVersionToAdd(releaseType, exactVersion, incrementBy, preRelease);
       }
     })
   );
 }
 
-/**
- * make sure the originallySharedDir was added before saving the component. also, make sure it was
- * not added twice.
- * we need three objects for this:
- * 1) component.pendingVersion => version pending to be saved in the filesystem. we want to make sure it has the added sharedDir.
- * 2) component.componentFromModel => previous version of the component. it has the original sharedDir.
- * 3) component.componentMap => current paths in the filesystem, which don't have the sharedDir.
- *
- * The component may be changed from the componentFromModel. The files may be removed and added and
- * new files may added, so we can't compare the files of componentFromModel to component.
- *
- * What we can do is calculating the sharedDir from component.componentFromModel
- * then, make sure that calculatedSharedDir + pathFromComponentMap === component.pendingVersion
- *
- * Also, make sure that the wrapDir has been removed
- */
-function validateDirManipulation(components: Component[]): void {
-  const throwOnError = (expectedPath: PathLinux, actualPath: PathLinux) => {
-    if (expectedPath !== actualPath) {
-      throw new ValidationError(
-        `failed validating the component paths with sharedDir, expected path ${expectedPath}, got ${actualPath}`
-      );
-    }
-  };
-  const validateComponent = (component: Component) => {
-    if (!component.componentMap) throw new Error(`componentMap is missing from ${component.id.toString()}`);
-    if (!component.componentFromModel) return;
-    // component.componentFromModel.setOriginallySharedDir();
-    const sharedDir = component.componentFromModel.originallySharedDir;
-    const wrapDir = component.componentFromModel.wrapDir;
-    const pathWithSharedDir = (pathStr: PathLinux): PathLinux => {
-      // $FlowFixMe componentMap is set here
-      // @ts-ignore AUTO-ADDED-AFTER-MIGRATION-PLEASE-FIX!
-      if (sharedDir && component.componentMap.origin === COMPONENT_ORIGINS.IMPORTED) {
-        return pathJoinLinux(sharedDir, pathStr);
-      }
-      return pathStr;
-    };
-    const pathWithoutWrapDir = (pathStr: PathLinux): PathLinux => {
-      if (wrapDir) {
-        return pathStr.replace(`${wrapDir}/`, '');
-      }
-      return pathStr;
-    };
-    const pathAfterDirManipulation = (pathStr: PathLinux): PathLinux => {
-      const withoutWrapDir = pathWithoutWrapDir(pathStr);
-      return pathWithSharedDir(withoutWrapDir);
-    };
-    const expectedMainFile = pathAfterDirManipulation(component.componentMap.mainFile);
-    // @ts-ignore AUTO-ADDED-AFTER-MIGRATION-PLEASE-FIX!
-    throwOnError(expectedMainFile, component.pendingVersion.mainFile);
-    // $FlowFixMe componentMap is set here
-    const componentMapFiles = component.componentMap.getAllFilesPaths();
-    // @ts-ignore AUTO-ADDED-AFTER-MIGRATION-PLEASE-FIX!
-    const componentFiles = component.pendingVersion.files.map((file) => file.relativePath);
-    componentMapFiles.forEach((file) => {
-      const expectedFile = pathAfterDirManipulation(file);
-      if (!componentFiles.includes(expectedFile)) {
-        throw new ValidationError(
-          `failed validating the component paths, expected a file ${expectedFile} to be in ${componentFiles.toString()} array`
-        );
-      }
-    });
-  };
-  components.forEach((component) => validateComponent(component));
+function getVersionByEnteredId(
+  enteredIds: BitIds,
+  component: Component,
+  modelComponent: ModelComponent
+): string | undefined {
+  const enteredId = enteredIds.searchWithoutVersion(component.id);
+  if (enteredId && enteredId.hasVersion()) {
+    const exactVersionOrReleaseType = getValidVersionOrReleaseType(enteredId.version as string);
+    return modelComponent.getVersionToAdd(
+      exactVersionOrReleaseType.releaseType,
+      exactVersionOrReleaseType.exactVersion
+    );
+  }
+  return undefined;
 }
 
 export default async function tagModelComponent({
@@ -186,21 +130,19 @@ export default async function tagModelComponent({
   editor,
   exactVersion,
   releaseType,
-  preRelease,
-  force,
+  preReleaseId,
   consumer,
   ignoreNewestVersion = false,
   skipTests = false,
-  verbose = false,
   skipAutoTag,
   soft,
   build,
   persist,
-  resolveUnmerged,
   isSnap = false,
   disableTagAndSnapPipelines,
   forceDeploy,
   incrementBy,
+  packageManagerConfigRootDir,
 }: {
   consumerComponents: Component[];
   ids: BitIds;
@@ -209,8 +151,8 @@ export default async function tagModelComponent({
   releaseType?: ReleaseType;
   incrementBy?: number;
   consumer: Consumer;
-  resolveUnmerged?: boolean;
   isSnap?: boolean;
+  packageManagerConfigRootDir?: string;
 } & BasicTagParams): Promise<{
   taggedComponents: Component[];
   autoTaggedResults: AutoTagResult[];
@@ -260,37 +202,9 @@ export default async function tagModelComponent({
     });
     const newestVersions = await Promise.all(newestVersionsP);
     const newestVersionsWithoutEmpty = newestVersions.filter((newest) => newest);
-    if (!isNilOrEmpty(newestVersionsWithoutEmpty)) {
+    if (!isEmpty(newestVersionsWithoutEmpty)) {
       // @ts-ignore AUTO-ADDED-AFTER-MIGRATION-PLEASE-FIX!
       throw new NewerVersionFound(newestVersionsWithoutEmpty);
-    }
-  }
-
-  let testsResults = [];
-  if (consumer.isLegacy) {
-    logger.debugAndAddBreadCrumb('tag-model-components', 'sequentially build all components');
-    await scope.buildMultiple(allComponentsToTag, consumer, false, verbose);
-
-    logger.debug('scope.putMany: sequentially test all components');
-
-    if (!skipTests) {
-      const testsResultsP = scope.testMultiple({
-        components: allComponentsToTag,
-        consumer,
-        verbose,
-        rejectOnFailure: !force,
-      });
-      try {
-        // @ts-ignore AUTO-ADDED-AFTER-MIGRATION-PLEASE-FIX!
-        testsResults = await testsResultsP;
-      } catch (err: any) {
-        // if force is true, ignore the tests and continue
-        if (!force) {
-          // @ts-ignore AUTO-ADDED-AFTER-MIGRATION-PLEASE-FIX!
-          if (!verbose) throw new ComponentSpecsFailed();
-          throw err;
-        }
-      }
     }
   }
 
@@ -307,36 +221,35 @@ export default async function tagModelComponent({
         autoTagIds,
         ids,
         incrementBy,
-        preRelease
+        preReleaseId,
+        soft
       );
-  setCurrentSchema(allComponentsToTag, consumer);
+  setCurrentSchema(allComponentsToTag);
   // go through all dependencies and update their versions
   updateDependenciesVersions(allComponentsToTag);
 
   await addLogToComponents(componentsToTag, autoTagComponents, persist, message, messagePerId);
 
   if (soft) {
-    consumer.updateNextVersionOnBitmap(allComponentsToTag, exactVersion, releaseType, preRelease);
+    consumer.updateNextVersionOnBitmap(allComponentsToTag, preReleaseId);
   } else {
-    if (!skipTests) addSpecsResultsToComponents(allComponentsToTag, testsResults);
     await addFlattenedDependenciesToComponents(consumer.scope, allComponentsToTag);
-    await throwForLegacyDependenciesInsideHarmony(consumer, allComponentsToTag);
     emptyBuilderData(allComponentsToTag);
-    addBuildStatus(consumer, allComponentsToTag, BuildStatus.Pending);
-    await addComponentsToScope(consumer, allComponentsToTag, Boolean(resolveUnmerged));
-    if (consumer.isLegacy) validateDirManipulation(allComponentsToTag);
+    addBuildStatus(allComponentsToTag, BuildStatus.Pending);
+    await addComponentsToScope(consumer, allComponentsToTag, build);
     await consumer.updateComponentsVersions(allComponentsToTag);
   }
 
   const publishedPackages: string[] = [];
-  if (!consumer.isLegacy && build) {
+  if (build) {
     const onTagOpts = { disableTagAndSnapPipelines, throwOnError: true, forceDeploy, skipTests, isSnap };
+    const isolateOptions = { packageManagerConfigRootDir };
     const results: Array<LegacyOnTagResult[]> = await mapSeries(scope.onTag, (func) =>
-      func(allComponentsToTag, onTagOpts)
+      func(allComponentsToTag, onTagOpts, isolateOptions)
     );
     results.forEach((tagResult) => updateComponentsByTagResult(allComponentsToTag, tagResult));
     publishedPackages.push(...getPublishedPackages(allComponentsToTag));
-    addBuildStatus(consumer, allComponentsToTag, BuildStatus.Succeed);
+    addBuildStatus(allComponentsToTag, BuildStatus.Succeed);
     await mapSeries(allComponentsToTag, (consumerComponent) => scope.sources.enrichSource(consumerComponent));
   }
 
@@ -347,14 +260,14 @@ export default async function tagModelComponent({
   return { taggedComponents: componentsToTag, autoTaggedResults: autoTagData, publishedPackages };
 }
 
-async function addComponentsToScope(consumer: Consumer, components: Component[], resolveUnmerged: boolean) {
+async function addComponentsToScope(consumer: Consumer, components: Component[], shouldValidateVersion: boolean) {
   const lane = await consumer.getCurrentLaneObject();
   await mapSeries(components, async (component) => {
     await consumer.scope.sources.addSource({
       source: component,
       consumer,
       lane,
-      resolveUnmerged,
+      shouldValidateVersion,
     });
   });
 }
@@ -371,39 +284,6 @@ export async function addFlattenedDependenciesToComponents(scope: Scope, compone
   const flattenedDependenciesGetter = new FlattenedDependenciesGetter(scope, components);
   await flattenedDependenciesGetter.populateFlattenedDependencies();
   loader.stop();
-}
-
-async function throwForLegacyDependenciesInsideHarmony(consumer: Consumer, components: Component[]) {
-  if (consumer.isLegacy) {
-    return;
-  }
-  const throwForComponent = async (component: Component) => {
-    const dependenciesIds = component.getAllDependenciesIds();
-    await Promise.all(
-      dependenciesIds.map(async (depId) => {
-        if (!depId.hasVersion()) return;
-        const modelComp = await consumer.scope.getModelComponentIfExist(depId);
-        if (!modelComp) return;
-        const version = await modelComp.loadVersion(depId.version as string, consumer.scope.objects);
-        if (version.isLegacy) {
-          throw new Error(
-            `unable tagging "${component.id.toString()}", its dependency "${depId.toString()}" is legacy`
-          );
-        }
-      })
-    );
-  };
-  await pMap(components, (component) => throwForComponent(component), { concurrency: concurrentComponentsLimit() });
-}
-
-function addSpecsResultsToComponents(components: Component[], testsResults): void {
-  components.forEach((component) => {
-    const testResult = testsResults.find((result) => {
-      // @ts-ignore AUTO-ADDED-AFTER-MIGRATION-PLEASE-FIX!
-      return component.id.isEqualWithoutScopeAndVersion(result.componentId);
-    });
-    component.specsResults = testResult ? testResult.specs : undefined;
-  });
 }
 
 async function addLogToComponents(
@@ -440,8 +320,7 @@ async function addLogToComponents(
   });
 }
 
-function setCurrentSchema(components: Component[], consumer: Consumer) {
-  if (consumer.isLegacy) return;
+function setCurrentSchema(components: Component[]) {
   components.forEach((component) => {
     component.schema = CURRENT_SCHEMA;
   });
@@ -474,8 +353,7 @@ export function getPublishedPackages(components: Component[]): string[] {
   return compact(publishedPackages);
 }
 
-function addBuildStatus(consumer: Consumer, components: Component[], buildStatus: BuildStatus) {
-  if (consumer.isLegacy) return;
+function addBuildStatus(components: Component[], buildStatus: BuildStatus) {
   components.forEach((component) => {
     component.buildStatus = buildStatus;
   });

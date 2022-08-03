@@ -58,9 +58,9 @@ export default async function checkoutVersion(
   checkoutProps: CheckoutProps
 ): Promise<ApplyVersionResults> {
   const { version, ids, promptMergeOptions } = checkoutProps;
-  // @ts-ignore AUTO-ADDED-AFTER-MIGRATION-PLEASE-FIX!
-  const { components } = await consumer.loadComponents(ids);
-  await consumer.scope.import(BitIds.fromArray(ids || []));
+  const bitIds = BitIds.fromArray(ids || []);
+  await consumer.scope.import(bitIds);
+  const { components } = await consumer.loadComponents(bitIds);
   const allComponentsStatus: ComponentStatus[] = await getAllComponentsStatus();
   const componentWithConflict = allComponentsStatus.find(
     (component) => component.mergeResults && component.mergeResults.hasConflicts
@@ -93,12 +93,12 @@ export default async function checkoutVersion(
   const componentsWithDependencies = componentsResults
     .map((c) => c.component)
     .filter((c) => c) as ComponentWithDependencies[];
-
+  const leftUnresolvedConflicts = componentWithConflict && checkoutProps.mergeStrategy === 'manual';
   if (componentsWithDependencies.length) {
     const manyComponentsWriter = new ManyComponentsWriter({
       consumer,
       componentsWithDependencies,
-      installNpmPackages: !checkoutProps.skipNpmInstall,
+      installNpmPackages: !checkoutProps.skipNpmInstall && !leftUnresolvedConflicts,
       override: true,
       verbose: checkoutProps.verbose,
       writeDists: !checkoutProps.ignoreDist,
@@ -112,7 +112,7 @@ export default async function checkoutVersion(
 
   const appliedVersionComponents = componentsResults.map((c) => c.applyVersionResult);
 
-  return { components: appliedVersionComponents, version, failedComponents };
+  return { components: appliedVersionComponents, version, failedComponents, leftUnresolvedConflicts };
 
   async function getAllComponentsStatus(): Promise<ComponentStatus[]> {
     const tmp = new Tmp(consumer.scope);
@@ -143,7 +143,7 @@ async function getComponentStatus(
     return componentStatus;
   };
   if (!componentModel) {
-    return returnFailure(`component ${component.id.toString()} doesn't have any version yet`);
+    return returnFailure(`component ${component.id.toString()} is new, no version to checkout`, true);
   }
   const unmerged = repo.unmergedComponents.getEntry(component.name);
   if (!reset && unmerged && unmerged.resolved === false) {
@@ -151,13 +151,13 @@ async function getComponentStatus(
       `component ${component.id.toStringWithoutVersion()} has conflicts that need to be resolved first, please use bit merge --resolve/--abort`
     );
   }
-  const getNewVersion = (): string => {
+  const getNewVersion = async (): Promise<string> => {
     // @ts-ignore AUTO-ADDED-AFTER-MIGRATION-PLEASE-FIX!
     if (reset) return component.id.version;
     // @ts-ignore if !reset the version is defined
-    return latestVersion ? componentModel.latest() : version;
+    return latestVersion ? componentModel.latestIncludeRemote(repo) : version;
   };
-  const newVersion = getNewVersion();
+  const newVersion = await getNewVersion();
   if (version && !latestVersion) {
     const hasVersion = await componentModel.hasVersion(version, repo);
     if (!hasVersion)
@@ -266,12 +266,7 @@ export async function applyVersion(
   });
   if (mergeResults) {
     // update files according to the merge results
-    const { filesStatus: modifiedStatus, modifiedFiles } = applyModifiedVersion(
-      files,
-      mergeResults,
-      mergeStrategy,
-      componentWithDependencies.component.originallySharedDir
-    );
+    const { filesStatus: modifiedStatus, modifiedFiles } = applyModifiedVersion(files, mergeResults, mergeStrategy);
     filesStatus = { ...filesStatus, ...modifiedStatus };
     componentWithDependencies.component.files = modifiedFiles;
   }
@@ -295,8 +290,7 @@ export async function applyVersion(
 export function applyModifiedVersion(
   componentFiles: SourceFile[],
   mergeResults: MergeResultsThreeWay,
-  mergeStrategy: MergeStrategy | null | undefined,
-  sharedDir?: string
+  mergeStrategy: MergeStrategy | null | undefined
 ): { filesStatus: Record<string, any>; modifiedFiles: SourceFile[] } {
   let modifiedFiles = componentFiles.map((file) => file.clone());
   const filesStatus = {};
@@ -305,8 +299,7 @@ export function applyModifiedVersion(
   }
   mergeResults.modifiedFiles.forEach((file) => {
     const filePath: PathOsBased = path.normalize(file.filePath);
-    const pathWithSharedDir = (p: string) => (sharedDir ? path.join(sharedDir, p) : p);
-    const foundFile = modifiedFiles.find((componentFile) => pathWithSharedDir(componentFile.relative) === filePath);
+    const foundFile = modifiedFiles.find((componentFile) => componentFile.relative === filePath);
     if (!foundFile) throw new GeneralError(`file ${filePath} not found`);
     if (file.conflict) {
       foundFile.contents = Buffer.from(file.conflict);

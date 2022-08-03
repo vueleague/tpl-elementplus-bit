@@ -20,12 +20,17 @@ export class CliGenerateCmd implements Command {
       'metadata',
       'metadata/front-matter to place at the top of the .md file, enter as an object e.g. --metadata.id=cli --metadata.title=commands',
     ],
+    ['j', 'json', 'output the commands info as JSON'],
   ] as CommandOptions;
 
   constructor(private cliMain: CLIMain) {}
 
   async report(args, { metadata }: GenerateOpts): Promise<string> {
     return new GenerateCommandsDoc(this.cliMain.commands, { metadata }).generate();
+  }
+
+  async json() {
+    return new GenerateCommandsDoc(this.cliMain.commands, {}).generateJson();
   }
 }
 
@@ -38,7 +43,7 @@ export class CliCmd implements Command {
   group = 'general';
   options = [] as CommandOptions;
 
-  constructor(private cliMain: CLIMain) {}
+  constructor(private cliMain: CLIMain, private docsDomain: string) {}
 
   async report(): Promise<string> {
     logger.isDaemon = true;
@@ -49,7 +54,7 @@ export class CliCmd implements Command {
       completer: (line, cb) => completer(line, cb, this.cliMain),
     });
 
-    const cliParser = new CLIParser(this.cliMain.commands, this.cliMain.groups);
+    const cliParser = new CLIParser(this.cliMain.commands, this.cliMain.groups, undefined, this.docsDomain);
 
     rl.prompt();
 

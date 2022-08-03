@@ -3,8 +3,10 @@ import { Component, ComponentAspect, ComponentMain, ComponentID, AspectData } fr
 import { GraphqlAspect, GraphqlMain } from '@teambit/graphql';
 import { Harmony, Slot, SlotRegistry } from '@teambit/harmony';
 import { Logger, LoggerAspect, LoggerMain } from '@teambit/logger';
+import type { AspectDefinition } from '@teambit/aspect-loader';
 import { ExtensionDataList, ExtensionDataEntry } from '@teambit/legacy/dist/consumer/config/extension-data';
 import findDuplications from '@teambit/legacy/dist/utils/array/find-duplications';
+import { BitId } from '@teambit/legacy-bit-id';
 import { EnvService } from './services';
 import { Environment } from './environment';
 import { EnvsAspect } from './environments.aspect';
@@ -100,6 +102,7 @@ export class EnvsMain {
       'teambit.html/html',
       'teambit.mdx/mdx',
       'teambit.envs/env',
+      'teambit.mdx/readme',
     ];
   }
 
@@ -219,6 +222,19 @@ export class EnvsMain {
   }
 
   /**
+   * get the env of the given component.
+   * This will try to use the regular getEnv but fallback to the calculate env (in case you are using it during on load)
+   * This is safe to be used on onLoad as well
+   */
+  getOrCalculateEnv(component: Component): EnvDefinition {
+    try {
+      return this.getEnv(component);
+    } catch (err) {
+      return this.calculateEnv(component);
+    }
+  }
+
+  /**
    * get an environment Descriptor.
    */
   getDescriptor(component: Component): Descriptor | null {
@@ -315,6 +331,17 @@ export class EnvsMain {
     }
 
     return this.getEnvsNotFromEnvsConfig(component);
+  }
+
+  /**
+   * whether a component has an env configured (either by variant or .bitmap).
+   */
+  hasEnvConfigured(component: Component): boolean {
+    return Boolean(this.getAllEnvsConfiguredOnComponent(component).length);
+  }
+
+  getAllRegisteredEnvs(): string[] {
+    return this.envSlot.toArray().map((envData) => envData[0]);
   }
 
   /**
@@ -425,11 +452,17 @@ export class EnvsMain {
     return envsAspect?.config.env;
   }
 
-  private getEnvDefinitionById(id: ComponentID): EnvDefinition | undefined {
+  getEnvDefinitionById(id: ComponentID): EnvDefinition | undefined {
     const envDef =
       this.getEnvDefinitionByStringId(id.toString()) ||
       this.getEnvDefinitionByStringId(id.toString({ ignoreVersion: true }));
     return envDef;
+  }
+
+  async getEnvDefinitionByLegacyId(id: BitId): Promise<EnvDefinition | undefined> {
+    const host = this.componentMain.getHost();
+    const newId = await host.resolveComponentId(id);
+    return this.getEnvDefinitionById(newId);
   }
 
   private getEnvDefinitionByStringId(envId: string): EnvDefinition | undefined {
@@ -443,6 +476,14 @@ export class EnvsMain {
   getEnvFromComponent(envComponent: Component) {
     const env = this.getEnvDefinitionById(envComponent.id);
     return env;
+  }
+
+  /**
+   * Return the env definition of teambit.envs/env
+   */
+  getEnvsEnvDefinition(): EnvDefinition {
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    return this.getEnvDefinitionByStringId('teambit.envs/env')!;
   }
 
   private printWarningIfFirstTime(envId: string, message: string) {
@@ -509,12 +550,12 @@ export class EnvsMain {
   }
 
   // refactor here
-  private createRuntime(components: Component[]): Runtime {
-    return new Runtime(this.aggregateByDefs(components), this.logger);
+  private async createRuntime(components: Component[]): Promise<Runtime> {
+    return new Runtime(await this.aggregateByDefs(components), this.logger);
   }
 
   // :TODO can be refactored to few utilities who will make repeating this very easy.
-  private aggregateByDefs(components: Component[]): EnvRuntime[] {
+  private async aggregateByDefs(components: Component[]): Promise<EnvRuntime[]> {
     this.throwForDuplicateComponents(components);
     const envsMap = {};
     components.forEach((component: Component) => {
@@ -530,9 +571,19 @@ export class EnvsMain {
         };
     });
 
-    return Object.keys(envsMap).map((key) => {
-      return new EnvRuntime(key, envsMap[key].env, envsMap[key].components);
-    });
+    return Promise.all(
+      Object.keys(envsMap).map(async (key) => {
+        const envAspectDef = await this.getEnvAspectDef(key);
+        return new EnvRuntime(key, envsMap[key].env, envsMap[key].components, envAspectDef);
+      })
+    );
+  }
+
+  private async getEnvAspectDef(envId: string): Promise<AspectDefinition> {
+    const host = this.componentMain.getHost();
+    const id = await host.resolveComponentId(envId);
+    const def = (await host.resolveAspects(MainRuntime.name, [id]))[0];
+    return def;
   }
 
   private throwForDuplicateComponents(components: Component[]) {

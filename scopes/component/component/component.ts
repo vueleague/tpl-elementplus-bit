@@ -5,6 +5,7 @@ import { ComponentID } from '@teambit/component-id';
 import { BitError } from '@teambit/bit-error';
 import { BuildStatus } from '@teambit/legacy/dist/constants';
 
+import { slice } from 'lodash';
 import { ComponentFactory } from './component-factory';
 import ComponentFS from './component-fs';
 // import { NothingToSnap } from './exceptions';
@@ -15,6 +16,7 @@ import { State } from './state';
 import { TagMap } from './tag-map';
 import { Tag } from './tag';
 import { CouldNotFindLatest } from './exceptions';
+import { IComponent, RawComponentMetadata } from './component-interface';
 // import { Author } from './types';
 
 type SnapsIterableOpts = {
@@ -27,7 +29,7 @@ export type InvalidComponent = { id: ComponentID; err: Error };
 /**
  * in-memory representation of a component.
  */
-export class Component {
+export class Component implements IComponent {
   constructor(
     /**
      * component ID represented by the `ComponentId` type.
@@ -105,6 +107,36 @@ export class Component {
     }
   }
 
+  /**
+   * get aspect data from current state.
+   */
+  get(id: string): RawComponentMetadata | undefined {
+    return this.state.aspects.get(id)?.serialize();
+  }
+
+  async getLogs(filter?: { type?: string; offset?: number; limit?: number; head?: string; sort?: string }) {
+    const allLogs = await this.factory.getLogs(this.id, false, filter?.head);
+
+    if (!filter) return allLogs;
+
+    const { type, limit, offset, sort } = filter;
+
+    const typeFilter = (snap) => {
+      if (type === 'tag') return snap.tag;
+      if (type === 'snap') return !snap.tag;
+      return true;
+    };
+
+    let filteredLogs = (type && allLogs.filter(typeFilter)) || allLogs;
+    if (limit) {
+      filteredLogs = slice(filteredLogs, offset, limit + (offset || 0));
+    }
+
+    if (sort && sort === 'asc') return filteredLogs;
+
+    return filteredLogs.reverse();
+  }
+
   stringify(): string {
     return JSON.stringify({
       id: this.id,
@@ -144,9 +176,7 @@ export class Component {
    * determines whether this component is modified in the workspace.
    */
   isModified(): Promise<boolean> {
-    if (!this.head) return Promise.resolve(true);
-    return Promise.resolve(this.state.isModified);
-    // return Promise.resolve(this.state.hash !== this.head.hash);
+    return this.factory.isModified(this);
   }
 
   /**

@@ -46,7 +46,7 @@ export class NewComponentHelperMain {
   ) {
     const targetPath = this.getNewComponentPath(targetId, options?.path);
     await this.throwForExistingPath(targetPath);
-    await this.workspace.write(targetPath, comp);
+    await this.workspace.write(comp, targetPath);
     try {
       await this.workspace.track({
         rootDir: targetPath,
@@ -86,7 +86,7 @@ export class NewComponentHelperMain {
 
   async getConfigFromExistingToNewComponent(comp: Component) {
     const aspectIds = comp.state.aspects.entries.map((e) => e.id.toString());
-    await this.workspace.loadAspects(aspectIds);
+    await this.workspace.loadAspects(aspectIds, undefined, 'new-component-helper.getConfigFromExistingToNewComponent');
     const fromExisting = {};
     comp.state.aspects.entries.forEach((entry) => {
       if (!entry.config) return;

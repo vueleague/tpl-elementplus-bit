@@ -11,11 +11,41 @@ export type CreateOptions = {
 };
 
 export class CreateCmd implements Command {
-  name = 'create <templateName> <componentNames...>';
-  description = 'create a new component from a template';
-  shortDescription = '';
+  name = 'create <template-name> <component-names...>';
+  description = 'create a new component (source files and config) using a template.';
   alias = '';
   loader = true;
+  arguments = [
+    {
+      name: 'template-name',
+      description:
+        "the template for generating the component \n(run 'bit templates' for a list of available templates)",
+    },
+    {
+      name: 'component-names...',
+      description: 'a list of component names to generate',
+    },
+  ];
+  examples = [
+    {
+      cmd: 'bit create react ui/button',
+      description: "creates a component named 'ui/button' using the 'react' template",
+    },
+    {
+      cmd: 'bit create react ui/button pages/register',
+      description: "creates two components, 'ui/button' and 'pages/register', using the 'react' template",
+    },
+    {
+      cmd: 'bit create react ui/button --scope my-org.my-scope',
+      description:
+        "creates a component named 'ui/button' and sets it scope to 'my-org.my-scope'. \nby default, the scope is the `defaultScope` value, configured in your `workspace.jsonc`.",
+    },
+    {
+      cmd: 'bit create react ui/button --env teambit.community/envs/community-react@1.95.13',
+      description:
+        "creates a component named 'ui/button' and sets it to use the 'community-react' env. \n(the template's default env is 'teambit.react/react').",
+    },
+  ];
   group = 'development';
   options = [
     ['n', 'namespace <string>', `sets the component's namespace and nested dirs inside the scope`],
@@ -25,7 +55,7 @@ export class CreateCmd implements Command {
     ['e', 'env <string>', "set the component's environment. (overrides the env from variants and the template)"],
   ] as CommandOptions;
 
-  constructor(private generator: GeneratorMain) {}
+  constructor(private generator: GeneratorMain, private docsDomain: string) {}
 
   async report([templateName, componentNames]: [string, string[]], options: CreateOptions) {
     const results = await this.generator.generateComponentTemplate(componentNames, templateName, options);
@@ -35,11 +65,11 @@ export class CreateCmd implements Command {
       .map((result) => {
         return `${chalk.bold(result.id.toString())}
     location: ${result.dir}
-    env:      ${result.envId}
+    env:      ${result.envId} (set by ${result.envSetBy})
 `;
       })
       .join('\n');
-    const footer = `env configuration is according to workspace variants, template config or --env flag. learn more at https://harmony-docs.bit.dev/building-with-bit/environments/#configure-environment-for-components`;
+    const footer = `env configuration is according to workspace variants, template config or --env flag. learn more at https://${this.docsDomain}/envs/using-envs`;
 
     return `${chalk.green(title)}\n\n${componentsData}\n\n${footer}`;
   }

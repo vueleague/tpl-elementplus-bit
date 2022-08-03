@@ -4,7 +4,7 @@ import { Logger, LongProcessLogger } from '@teambit/logger';
 import mapSeries from 'p-map-series';
 import prettyTime from 'pretty-time';
 import { ArtifactFactory, ArtifactList } from './artifact';
-import { BuildTask, BuildTaskHelper } from './build-task';
+import { BuildTask, BuildTaskHelper, BuiltTaskResult } from './build-task';
 import { ComponentResult } from './types';
 import { TasksQueue } from './tasks-queue';
 import { EnvsBuildContext } from './builder.service';
@@ -67,6 +67,7 @@ export class BuildPipe {
    * execute a pipeline of build tasks.
    */
   async execute(): Promise<TaskResultsList> {
+    this.addSignalListener();
     await this.executePreBuild();
     this.longProcessLogger = this.logger.createLongProcessLogger('running tasks', this.tasksQueue.length);
     await mapSeries(this.tasksQueue, async ({ task, env }) => this.executeTask(task, env));
@@ -75,6 +76,19 @@ export class BuildPipe {
     await this.executePostBuild(tasksResultsList);
 
     return tasksResultsList;
+  }
+
+  /**
+   * for some reason, some tasks (such as typescript compilation) ignore ctrl+C. this fixes it.
+   */
+  private addSignalListener() {
+    process.on('SIGTERM', () => {
+      process.exit();
+    });
+
+    process.on('SIGINT', () => {
+      process.exit();
+    });
   }
 
   private async executePreBuild() {
@@ -97,7 +111,14 @@ export class BuildPipe {
     const startTask = process.hrtime();
     const taskStartTime = Date.now();
     const buildContext = this.getBuildContext(env.id);
-    const buildTaskResult = await task.execute(buildContext);
+    let buildTaskResult: BuiltTaskResult;
+    try {
+      buildTaskResult = await task.execute(buildContext);
+    } catch (err) {
+      this.logger.consoleFailure(`env: ${env.id}, task "${taskId}" threw an error`);
+      throw err;
+    }
+
     const endTime = Date.now();
     const compsWithErrors = buildTaskResult.componentsResults.filter((c) => c.errors?.length);
     let artifacts;

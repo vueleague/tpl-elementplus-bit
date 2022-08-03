@@ -1,19 +1,24 @@
+import { Routes, Route } from 'react-router-dom';
 import { MainDropdown, MenuItemSlot } from '@teambit/ui-foundation.ui.main-dropdown';
 import { VersionDropdown } from '@teambit/component.ui.version-dropdown';
 import { FullLoader } from '@teambit/ui-foundation.ui.full-loader';
 import type { ConsumeMethod } from '@teambit/ui-foundation.ui.use-box.menu';
-import { useLocation } from '@teambit/base-ui.routing.routing-provider';
-import { compact, flatten, groupBy } from 'lodash';
+import { useLocation } from '@teambit/base-react.navigation.link';
+import { flatten, groupBy, compact } from 'lodash';
 import classnames from 'classnames';
 import React, { useMemo } from 'react';
 import { UseBoxDropdown } from '@teambit/ui-foundation.ui.use-box.dropdown';
 import { Menu as ConsumeMethodsMenu } from '@teambit/ui-foundation.ui.use-box.menu';
 import { LaneModel, useLanesContext } from '@teambit/lanes.ui.lanes';
+import { LegacyComponentLog } from '@teambit/legacy-component-log';
 import type { ComponentModel } from '../component-model';
-import { useComponent } from '../use-component';
+import { useComponent as useComponentQuery, UseComponentType } from '../use-component';
 import { MenuNav } from './menu-nav';
+import { MobileMenuNav } from './mobile-menu-nav';
 import styles from './menu.module.scss';
 import { OrderedNavigationSlot, ConsumeMethodSlot } from './nav-plugin';
+import { useIdFromLocation } from '../use-component-from-location';
+import { ComponentID } from '../..';
 
 export type MenuProps = {
   className?: string;
@@ -32,28 +37,63 @@ export type MenuProps = {
   menuItemSlot: MenuItemSlot;
 
   consumeMethodSlot: ConsumeMethodSlot;
+
+  componentIdStr?: string;
+
+  useComponent?: UseComponentType;
 };
 
 /**
  * top bar menu.
  */
-export function Menu({ navigationSlot, widgetSlot, className, host, menuItemSlot, consumeMethodSlot }: MenuProps) {
-  const { component } = useComponent(host);
+export function ComponentMenu({
+  navigationSlot,
+  widgetSlot,
+  className,
+  host,
+  menuItemSlot,
+  consumeMethodSlot,
+  componentIdStr,
+  useComponent,
+}: MenuProps) {
+  const idFromLocation = useIdFromLocation();
+  const componentId = componentIdStr ? ComponentID.fromString(componentIdStr) : undefined;
+  const fullName = componentId?.fullName || idFromLocation;
+  const lanesContext = useLanesContext();
+  const laneComponent = fullName ? lanesContext?.resolveComponent(fullName) : undefined;
+  const useComponentOptions = {
+    logFilters: laneComponent && { log: { logHead: laneComponent.version } },
+    customUseComponent: useComponent,
+  };
+
+  const { component } = useComponentQuery(
+    host,
+    laneComponent?.id.toString() || componentId?.toStringWithoutVersion() || fullName,
+    useComponentOptions
+  );
   const mainMenuItems = useMemo(() => groupBy(flatten(menuItemSlot.values()), 'category'), [menuItemSlot]);
   if (!component) return <FullLoader />;
   return (
-    <div className={classnames(styles.topBar, className)}>
-      <div className={styles.leftSide}>
-        <MenuNav navigationSlot={navigationSlot} />
-      </div>
-      <div className={styles.rightSide}>
-        <div className={styles.widgets}>
-          <MenuNav navigationSlot={widgetSlot} />
-        </div>
-        <VersionRelatedDropdowns component={component} consumeMethods={consumeMethodSlot} host={host} />
-        <MainDropdown menuItems={mainMenuItems} />
-      </div>
-    </div>
+    <Routes>
+      <Route
+        path={`${fullName}/*`}
+        element={
+          <div className={classnames(styles.topBar, className)}>
+            <div className={styles.leftSide}>
+              <MenuNav navigationSlot={navigationSlot} />
+              <MobileMenuNav navigationSlot={navigationSlot} widgetSlot={widgetSlot} />
+            </div>
+            <div className={styles.rightSide}>
+              <div className={styles.widgets}>
+                <MenuNav navigationSlot={widgetSlot} />
+              </div>
+              <VersionRelatedDropdowns component={component} consumeMethods={consumeMethodSlot} host={host} />
+              <MainDropdown menuItems={mainMenuItems} />
+            </div>
+          </div>
+        }
+      />
+    </Routes>
   );
 }
 
@@ -67,38 +107,61 @@ function VersionRelatedDropdowns({
   host: string;
 }) {
   const location = useLocation();
-  const isNew = component.tags.isEmpty();
   const lanesContext = useLanesContext();
-  const currentLane = lanesContext?.currentLane;
-
+  const currentLane = lanesContext?.viewedLane;
+  const { logs } = component;
   const isWorkspace = host === 'teambit.workspace/workspace';
-  const versionList = useMemo(() => {
-    const tagsArray = !currentLane
-      ? component.tags
-          ?.toArray()
-          .map((tag) => tag?.version?.version)
-          .filter((x) => x !== undefined)
-          .reverse()
-      : [component.id.version];
-    const wsLink = [isWorkspace && !isNew && !currentLane ? 'workspace' : undefined];
 
-    return compact([...wsLink, ...tagsArray]);
-  }, [component.tags, isWorkspace, isNew, currentLane]);
+  const snaps = useMemo(() => {
+    return (logs || [])
+      .filter((log) => !log.tag)
+      .map((snap) => ({ ...snap, version: snap.hash }))
+      .reverse();
+  }, [logs]);
+
+  const tags = useMemo(() => {
+    const tagLookup = new Map<string, LegacyComponentLog>();
+    (logs || [])
+      .filter((log) => log.tag)
+      .forEach((tag) => {
+        tagLookup.set(tag?.tag as string, tag);
+      });
+    return compact(
+      component.tags
+        ?.toArray()
+        .reverse()
+        .map((tag) => tagLookup.get(tag.version.version))
+    ).map((tag) => ({ ...tag, version: tag.tag as string }));
+  }, [logs]);
+
+  const isNew = snaps.length === 0 && tags.length === 0;
+
+  const lanes = lanesContext?.getLanesByComponentId(component.id) || [];
+  const localVersion = isWorkspace && !isNew && !currentLane;
 
   const currentVersion =
-    isWorkspace && !isNew && !location.search.includes('version') ? 'workspace' : component.version;
+    isWorkspace && !isNew && !location?.search.includes('version') ? 'workspace' : component.version;
 
   const methods = useConsumeMethods(consumeMethods, component, currentLane);
   return (
     <>
-      {versionList.length > 0 && (
+      {tags.length > 0 && (
         <UseBoxDropdown
           position="bottom-end"
           className={styles.useBox}
           Menu={<ConsumeMethodsMenu methods={methods} componentName={component.id.name} />}
         />
       )}
-      <VersionDropdown versions={versionList} currentVersion={currentVersion} latestVersion={component.latest} />
+      <VersionDropdown
+        tags={tags}
+        snaps={snaps}
+        lanes={lanes}
+        localVersion={localVersion}
+        currentVersion={currentVersion}
+        latestVersion={component.latest}
+        currentLane={currentLane}
+        menuClassName={styles.componentVersionMenu}
+      />
     </>
   );
 }

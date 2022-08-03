@@ -1,8 +1,9 @@
 import { MainRuntime } from '@teambit/cli';
 import { compact, pick } from 'lodash';
+import { AspectLoaderMain, AspectLoaderAspect } from '@teambit/aspect-loader';
 import { Component, ComponentMap, ComponentAspect, ComponentID } from '@teambit/component';
 import type { ComponentMain, ComponentFactory } from '@teambit/component';
-import { getComponentPackageVersion } from '@teambit/component-package-version';
+import { getComponentPackageVersion, snapToSemver } from '@teambit/component-package-version';
 import { GraphAspect } from '@teambit/graph';
 import type { GraphBuilder } from '@teambit/graph';
 import {
@@ -14,18 +15,14 @@ import {
   DependencyList,
   ComponentDependency,
   KEY_NAME_BY_LIFECYCLE_TYPE,
+  PackageManagerInstallOptions,
 } from '@teambit/dependency-resolver';
 import legacyLogger from '@teambit/legacy/dist/logger/logger';
 import { Logger, LoggerAspect, LoggerMain } from '@teambit/logger';
 import { BitIds } from '@teambit/legacy/dist/bit-id';
 import LegacyScope from '@teambit/legacy/dist/scope/scope';
 import GlobalConfigAspect, { GlobalConfigMain } from '@teambit/global-config';
-import {
-  CACHE_ROOT,
-  DEPENDENCIES_FIELDS,
-  PACKAGE_JSON,
-  CFG_CAPSULES_ROOT_BASE_DIR,
-} from '@teambit/legacy/dist/constants';
+import { DEPENDENCIES_FIELDS, PACKAGE_JSON } from '@teambit/legacy/dist/constants';
 import ConsumerComponent from '@teambit/legacy/dist/consumer/component';
 import PackageJsonFile from '@teambit/legacy/dist/consumer/component/package-json-file';
 import { importMultipleDistsArtifacts } from '@teambit/legacy/dist/consumer/component/sources/artifact-files';
@@ -44,8 +41,6 @@ import { symlinkBitLegacyToCapsules } from './symlink-bit-legacy-to-capsules';
 import { symlinkOnCapsuleRoot, symlinkDependenciesToCapsules } from './symlink-dependencies-to-capsules';
 import { Network } from './network';
 
-const DEFAULT_CAPSULES_BASE_DIR = path.join(CACHE_ROOT, 'capsules'); // TODO: move elsewhere
-
 export type ListResults = {
   workspace: string;
   capsules: string[];
@@ -60,6 +55,10 @@ export type IsolateComponentsInstallOptions = {
   copyPeerToRuntimeOnRoot?: boolean;
   installPeersFromEnvs?: boolean;
   installTeambitBit?: boolean;
+  packageManagerConfigRootDir?: string;
+  // When set to true, the newly added components will be grouped inside one directory.
+  // This is useful for scope aspect capsules, which are installed in stages.
+  useNesting?: boolean;
 };
 
 type CreateGraphOptions = {
@@ -130,6 +129,8 @@ export type IsolateComponentsOptions = CreateGraphOptions & {
    * Force specific host to get the component from.
    */
   host?: ComponentFactory;
+
+  packageManagerConfigRootDir?: string;
 };
 
 type CapsulePackageJsonData = {
@@ -148,19 +149,41 @@ const DEFAULT_ISOLATE_INSTALL_OPTIONS: IsolateComponentsInstallOptions = {
 
 export class IsolatorMain {
   static runtime = MainRuntime;
-  static dependencies = [DependencyResolverAspect, LoggerAspect, ComponentAspect, GraphAspect, GlobalConfigAspect];
+  static dependencies = [
+    DependencyResolverAspect,
+    LoggerAspect,
+    ComponentAspect,
+    GraphAspect,
+    GlobalConfigAspect,
+    AspectLoaderAspect,
+  ];
   static defaultConfig = {};
   _componentsPackagesVersionCache: { [idStr: string]: string } = {}; // cache packages versions of components
 
-  static async provider([dependencyResolver, loggerExtension, componentAspect, graphAspect, globalConfig]: [
+  static async provider([
+    dependencyResolver,
+    loggerExtension,
+    componentAspect,
+    graphAspect,
+    globalConfig,
+    aspectLoader,
+  ]: [
     DependencyResolverMain,
     LoggerMain,
     ComponentMain,
     GraphBuilder,
-    GlobalConfigMain
+    GlobalConfigMain,
+    AspectLoaderMain
   ]): Promise<IsolatorMain> {
     const logger = loggerExtension.createLogger(IsolatorAspect.id);
-    const isolator = new IsolatorMain(dependencyResolver, logger, componentAspect, graphAspect, globalConfig);
+    const isolator = new IsolatorMain(
+      dependencyResolver,
+      logger,
+      componentAspect,
+      graphAspect,
+      globalConfig,
+      aspectLoader
+    );
     return isolator;
   }
   constructor(
@@ -168,7 +191,8 @@ export class IsolatorMain {
     private logger: Logger,
     private componentAspect: ComponentMain,
     private graphBuilder: GraphBuilder,
-    private globalConfig: GlobalConfigMain
+    private globalConfig: GlobalConfigMain,
+    private aspectLoader: AspectLoaderMain
   ) {}
 
   // TODO: the legacy scope used for the component writer, which then decide if it need to write the artifacts and dists
@@ -216,6 +240,20 @@ export class IsolatorMain {
   }
 
   /**
+   *
+   * @param originalCapsule the capsule that contains the original component
+   * @param newBaseDir relative path. (it will be saved inside `this.getRootDirOfAllCapsules()`. the final path of the capsule will be getRootDirOfAllCapsules() + newBaseDir + filenameify(component.id))
+   * @returns a new capsule with the same content of the original capsule but with a new baseDir and all packages
+   * installed in the newBaseDir.
+   */
+  async cloneCapsule(originalCapsule: Capsule, newBaseDir: string): Promise<Capsule> {
+    const network = await this.isolateComponents([originalCapsule.component.id], { baseDir: newBaseDir });
+    const clonedCapsule = network.seedersCapsules[0];
+    await fs.copy(originalCapsule.path, clonedCapsule.path);
+    return clonedCapsule;
+  }
+
+  /**
    * Create capsules for the provided components
    * do not use this outside directly, use isolate components which build the entire network
    * @param components
@@ -227,32 +265,58 @@ export class IsolatorMain {
     opts: IsolateComponentsOptions,
     legacyScope?: Scope
   ): Promise<CapsuleList> {
+    const installOptions = {
+      ...DEFAULT_ISOLATE_INSTALL_OPTIONS,
+      ...opts.installOptions,
+      useNesting: this.dependencyResolver.hasRootComponents() && opts.installOptions?.useNesting,
+    };
     const config = { installPackages: true, ...opts };
     const capsulesDir = this.getCapsulesRootDir(opts.baseDir as string, opts.rootBaseDir);
     if (opts.emptyRootDir) {
       await fs.emptyDir(capsulesDir);
     }
-    const capsules = await this.createCapsulesFromComponents(components, capsulesDir, config);
-    const capsuleList = CapsuleList.fromArray(capsules);
+    let capsules = await this.createCapsulesFromComponents(components, capsulesDir, config);
+    const allCapsuleList = CapsuleList.fromArray(capsules);
+    let capsuleList = allCapsuleList;
     if (opts.getExistingAsIs) {
       return capsuleList;
     }
 
     if (opts.skipIfExists) {
-      const existingCapsules = CapsuleList.fromArray(
-        capsuleList.filter((capsule) => capsule.fs.existsSync('package.json'))
-      );
+      if (!installOptions.useNesting) {
+        const existingCapsules = CapsuleList.fromArray(
+          capsuleList.filter((capsule) => capsule.fs.existsSync('package.json'))
+        );
 
-      if (existingCapsules.length === capsuleList.length) return existingCapsules;
+        if (existingCapsules.length === capsuleList.length) return existingCapsules;
+      } else {
+        capsules = capsules.filter((capsule) => !capsule.fs.existsSync('package.json'));
+        capsuleList = CapsuleList.fromArray(capsules);
+      }
     }
     const capsulesWithPackagesData = await this.getCapsulesPreviousPackageJson(capsules);
 
     await this.writeComponentsInCapsules(components, capsuleList, legacyScope);
     await this.updateWithCurrentPackageJsonData(capsulesWithPackagesData, capsuleList);
-    const installOptions = Object.assign({}, DEFAULT_ISOLATE_INSTALL_OPTIONS, opts.installOptions || {});
     if (installOptions.installPackages) {
-      await this.installInCapsules(capsulesDir, capsuleList, installOptions, opts.cachePackagesOnCapsulesRoot ?? false);
-      await this.linkInCapsules(capsulesDir, capsuleList, capsulesWithPackagesData, opts.linkingOptions ?? {});
+      const cachePackagesOnCapsulesRoot = opts.cachePackagesOnCapsulesRoot ?? false;
+      const linkingOptions = opts.linkingOptions ?? {};
+      if (installOptions.useNesting) {
+        await Promise.all(
+          capsuleList.map(async (capsule) => {
+            const newCapsuleList = CapsuleList.fromArray([capsule]);
+            await this.installInCapsules(capsule.path, newCapsuleList, installOptions, cachePackagesOnCapsulesRoot);
+            await this.linkInCapsules(capsulesDir, newCapsuleList, capsulesWithPackagesData, linkingOptions);
+          })
+        );
+      } else {
+        // When nesting is used, the first component (which is the entry component) is installed in the root
+        // and all other components (which are the dependencies of the entry component) are installed in
+        // a subdirectory.
+        const rootDir = installOptions?.useNesting ? capsuleList[0].path : capsulesDir;
+        await this.installInCapsules(rootDir, capsuleList, installOptions, cachePackagesOnCapsulesRoot);
+        await this.linkInCapsules(capsulesDir, capsuleList, capsulesWithPackagesData, linkingOptions);
+      }
     }
 
     // rewrite the package-json with the component dependencies in it. the original package.json
@@ -267,14 +331,14 @@ export class IsolatorMain {
       capsuleWithPackageData.capsule.fs.writeFileSync(PACKAGE_JSON, JSON.stringify(currentPackageJson, null, 2));
     });
 
-    return capsuleList;
+    return allCapsuleList;
   }
 
   private async installInCapsules(
     capsulesDir: string,
     capsuleList: CapsuleList,
     isolateInstallOptions: IsolateComponentsInstallOptions,
-    cachePackagesOnCapsulesRoot: boolean
+    cachePackagesOnCapsulesRoot?: boolean
   ) {
     const installer = this.dependencyResolver.getInstaller({
       rootDir: capsulesDir,
@@ -286,13 +350,18 @@ export class IsolatorMain {
     const peerOnlyPolicy = this.getWorkspacePeersOnlyPolicy();
     const installOptions: InstallOptions = {
       installTeambitBit: !!isolateInstallOptions.installTeambitBit,
+      packageManagerConfigRootDir: isolateInstallOptions.packageManagerConfigRootDir,
     };
 
-    const packageManagerInstallOptions = {
+    const packageManagerInstallOptions: PackageManagerInstallOptions = {
       dedupe: isolateInstallOptions.dedupe,
       copyPeerToRuntimeOnComponents: isolateInstallOptions.copyPeerToRuntimeOnComponents,
       copyPeerToRuntimeOnRoot: isolateInstallOptions.copyPeerToRuntimeOnRoot,
       installPeersFromEnvs: isolateInstallOptions.installPeersFromEnvs,
+      overrides: this.dependencyResolver.config.capsulesOverrides || this.dependencyResolver.config.overrides,
+      rootComponentsForCapsules: this.dependencyResolver.hasRootComponents(),
+      useNesting: isolateInstallOptions.useNesting,
+      keepExistingModulesDir: this.dependencyResolver.hasRootComponents(),
     };
     await installer.install(
       capsulesDir,
@@ -318,9 +387,21 @@ export class IsolatorMain {
     await linker.link(capsulesDir, peerOnlyPolicy, this.toComponentMap(capsuleList), {
       ...linkingOptions,
       legacyLink: false,
+      linkNestedDepsInNM: !this.dependencyResolver.hasRootComponents() && linkingOptions.linkNestedDepsInNM,
     });
-    await symlinkOnCapsuleRoot(capsuleList, this.logger, capsulesDir);
-    await symlinkDependenciesToCapsules(capsulesWithModifiedPackageJson, capsuleList, this.logger);
+    if (!this.dependencyResolver.hasRootComponents()) {
+      await symlinkOnCapsuleRoot(capsuleList, this.logger, capsulesDir);
+      await symlinkDependenciesToCapsules(capsulesWithModifiedPackageJson, capsuleList, this.logger);
+    } else {
+      const coreAspectIds = this.aspectLoader.getCoreAspectIds();
+      const coreAspectCapsules = CapsuleList.fromArray(
+        capsuleList.filter((capsule) => {
+          const [compIdWithoutVersion] = capsule.component.id.toString().split('@');
+          return coreAspectIds.includes(compIdWithoutVersion);
+        })
+      );
+      await symlinkOnCapsuleRoot(coreAspectCapsules, this.logger, capsulesDir);
+    }
     // TODO: this is a hack to have access to the bit bin project in order to access core extensions from user extension
     // TODO: remove this after exporting core extensions as components
     await symlinkBitLegacyToCapsules(capsulesWithModifiedPackageJson, this.logger);
@@ -340,14 +421,32 @@ export class IsolatorMain {
   }
 
   private async writeComponentsInCapsules(components: Component[], capsuleList: CapsuleList, legacyScope?: Scope) {
-    const legacyComponents = components.map((component) => component.state._consumer.clone());
-    if (legacyScope) await importMultipleDistsArtifacts(legacyScope, legacyComponents);
+    const modifiedComps: Component[] = [];
+    const unmodifiedComps: Component[] = [];
+    await Promise.all(
+      components.map(async (component) => {
+        const isModified = await component.isModified();
+        if (!isModified && component.buildStatus === 'succeed') {
+          // the "component.buildStatus" check is important for "bit sign" when on lane to not go to the original scope
+          unmodifiedComps.push(component);
+        } else {
+          modifiedComps.push(component);
+        }
+      })
+    );
+    const legacyUnmodifiedComps = unmodifiedComps.map((component) => component.state._consumer.clone());
+    const legacyModifiedComps = modifiedComps.map((component) => component.state._consumer.clone());
+    const legacyComponents = [...legacyUnmodifiedComps, ...legacyModifiedComps];
+    if (legacyScope && unmodifiedComps.length) await importMultipleDistsArtifacts(legacyScope, legacyUnmodifiedComps);
     const allIds = BitIds.fromArray(legacyComponents.map((c) => c.id));
     await Promise.all(
       components.map(async (component) => {
         const capsule = capsuleList.getCapsule(component.id);
         if (!capsule) return;
         const params = this.getComponentWriteParams(component.state._consumer, allIds, legacyScope);
+        if (await component.isModified()) {
+          delete params.scope;
+        }
         const componentWriter = new ComponentWriter(params);
         await componentWriter.populateComponentsFilesToWrite();
         await component.state._consumer.dataToPersist.persistAllToCapsule(capsule, { keepExistingCapsule: true });
@@ -433,7 +532,7 @@ export class IsolatorMain {
   }
 
   private getRootDirOfAllCapsules(): string {
-    return this.globalConfig.getSync(CFG_CAPSULES_ROOT_BASE_DIR) || DEFAULT_CAPSULES_BASE_DIR;
+    return this.globalConfig.getGlobalCapsulesBaseDir();
   }
 
   private wereDependenciesInPackageJsonChanged(capsuleWithPackageData: CapsulePackageJsonData): boolean {
@@ -494,6 +593,8 @@ export class IsolatorMain {
         let version = dep.version;
         if (depCapsule) {
           version = await this.getComponentPackageVersionWithCache(depCapsule?.component);
+        } else {
+          version = snapToSemver(version);
         }
         const keyName = KEY_NAME_BY_LIFECYCLE_TYPE[dep.lifecycle];
         const entry = dep.toManifest();

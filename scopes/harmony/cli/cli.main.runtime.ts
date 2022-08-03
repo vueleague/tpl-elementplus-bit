@@ -1,8 +1,11 @@
 import { Slot, SlotRegistry } from '@teambit/harmony';
 import { buildRegistry } from '@teambit/legacy/dist/cli';
 import { Command } from '@teambit/legacy/dist/cli/command';
-import LegacyLoadExtensions from '@teambit/legacy/dist/legacy-extensions/extensions-loader';
+import { CommunityAspect } from '@teambit/community';
+import type { CommunityMain } from '@teambit/community';
+
 import { groups, GroupsType } from '@teambit/legacy/dist/cli/command-groups';
+import { loadConsumerIfExist } from '@teambit/legacy/dist/consumer';
 import { clone } from 'lodash';
 import { CLIAspect, MainRuntime } from './cli.aspect';
 import { AlreadyExistsError } from './exceptions/already-exists';
@@ -22,7 +25,7 @@ export type CommandsSlot = SlotRegistry<CommandList>;
 export class CLIMain {
   public groups: GroupsType = clone(groups); // if it's not cloned, it is cached across loadBit() instances
 
-  constructor(private commandsSlot: CommandsSlot, private onStartSlot: OnStartSlot) {}
+  constructor(private commandsSlot: CommandsSlot, private onStartSlot: OnStartSlot, private community: CommunityMain) {}
 
   /**
    * registers a new command in to the CLI.
@@ -37,7 +40,8 @@ export class CLIMain {
   }
 
   /**
-   * helpful for having the same command name in different environments (legacy and Harmony)
+   * helpful for having the same command name in different environments (e.g. legacy and non-legacy).
+   * for example `cli.unregister('tag');` removes the "bit tag" command.
    */
   unregister(commandName: string) {
     this.commandsSlot.toArray().forEach(([aspectId, commands]) => {
@@ -59,7 +63,7 @@ export class CLIMain {
    * get an instance of a registered command. (useful for aspects to modify and extend existing commands)
    */
   getCommand(name: string): Command | undefined {
-    return this.commands.find((command) => command.name === name);
+    return this.commands.find((command) => getCommandId(command.name) === name);
   }
 
   /**
@@ -85,7 +89,7 @@ export class CLIMain {
    */
   async run(hasWorkspace: boolean) {
     await this.invokeOnStart(hasWorkspace);
-    const CliParser = new CLIParser(this.commands, this.groups);
+    const CliParser = new CLIParser(this.commands, this.groups, undefined, this.community.getDocsDomain());
     await CliParser.parse();
   }
 
@@ -98,7 +102,7 @@ export class CLIMain {
   private setDefaults(command: Command) {
     command.alias = command.alias || '';
     command.description = command.description || '';
-    command.shortDescription = command.shortDescription || '';
+    command.extendedDescription = command.extendedDescription || '';
     command.group = command.group || 'ungrouped';
     command.options = command.options || [];
     command.private = command.private || false;
@@ -110,34 +114,28 @@ export class CLIMain {
         command.loader = true;
       }
     }
+    if (command.helpUrl && !isFullUrl(command.helpUrl)) {
+      command.helpUrl = `https://${this.community.getDocsDomain()}/${command.helpUrl}`;
+    }
   }
 
-  static dependencies = [];
+  static dependencies = [CommunityAspect];
   static runtime = MainRuntime;
   static slots = [Slot.withType<CommandList>(), Slot.withType<OnStart>()];
 
-  static async provider(deps, config, [commandsSlot, onStartSlot]: [CommandsSlot, OnStartSlot]) {
-    const cliMain = new CLIMain(commandsSlot, onStartSlot);
-    const legacyExtensions = await LegacyLoadExtensions();
-    // Make sure to register all the hooks actions in the global hooks manager
-    legacyExtensions.forEach((extension) => {
-      extension.registerHookActionsOnHooksManager();
-    });
-
-    const extensionsCommands = legacyExtensions.reduce((acc, curr) => {
-      if (curr.commands && curr.commands.length) {
-        // @ts-ignore AUTO-ADDED-AFTER-MIGRATION-PLEASE-FIX!
-        acc = acc.concat(curr.commands);
-      }
-      return acc;
-    }, []);
-
-    const legacyRegistry = buildRegistry(extensionsCommands);
-    const legacyCommands = legacyRegistry.commands.concat(legacyRegistry.extensionsCommands || []);
+  static async provider(
+    [community]: [CommunityMain],
+    config,
+    [commandsSlot, onStartSlot]: [CommandsSlot, OnStartSlot]
+  ) {
+    const cliMain = new CLIMain(commandsSlot, onStartSlot, community);
+    const legacyRegistry = buildRegistry();
+    await ensureWorkspaceAndScope();
+    const legacyCommands = legacyRegistry.commands;
     const legacyCommandsAdapters = legacyCommands.map((command) => new LegacyCommandAdapter(command, cliMain));
     const cliGenerateCmd = new CliGenerateCmd(cliMain);
-    const cliCmd = new CliCmd(cliMain);
-    const helpCmd = new HelpCmd(cliMain);
+    const cliCmd = new CliCmd(cliMain, community.getDocsDomain());
+    const helpCmd = new HelpCmd(cliMain, community.getDocsDomain());
     cliCmd.commands.push(cliGenerateCmd);
     cliMain.register(...legacyCommandsAdapters, new CompletionCmd(), cliCmd, helpCmd);
     return cliMain;
@@ -145,3 +143,21 @@ export class CLIMain {
 }
 
 CLIAspect.addRuntime(CLIMain);
+
+/**
+ * kind of a hack.
+ * in the legacy, this is running at the beginning and it take care of issues when Bit files are missing,
+ * such as ".bit".
+ * (to make this process better, you can easily remove it and run the e2e-tests. you'll see some failing)
+ */
+async function ensureWorkspaceAndScope() {
+  try {
+    await loadConsumerIfExist();
+  } catch (err) {
+    // do nothing. it could fail for example with ScopeNotFound error, which is taken care of in "bit init".
+  }
+}
+
+function isFullUrl(url: string) {
+  return url.startsWith('http://') || url.startsWith('https://');
+}
