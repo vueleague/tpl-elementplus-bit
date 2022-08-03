@@ -1929,7 +1929,7 @@ needed-for: ${neededFor || '<unknown>'}`);
     await this.link({
       linkTeambitBit: false,
       legacyLink: true,
-      linkCoreAspects: true,
+      linkCoreAspects: this.dependencyResolver.linkCoreAspects(),
       linkDepsResolvedFromEnv: !hasRootComponents,
       linkNestedDepsInNM: !this.isLegacy && !hasRootComponents,
     });
