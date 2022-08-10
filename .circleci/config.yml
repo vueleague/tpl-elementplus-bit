@@ -1295,11 +1295,9 @@ jobs:
 
   windows_bvm_install:
     <<: *windows_defaults
-    environment:
-      Path: C:\Users\circleci\.npm-global;C:\Users\circleci\AppData\Local\.bvm;$ENV:PATH
     steps:
-      # - attach_workspace:
-          # at: .
+      - attach_workspace:
+          at: .
       - run: nvm install 16.16.0
       - run: nvm use 16.16.0
       - run: npm view @teambit/bit version | Out-File -FilePath .\version.txt
