@@ -14,7 +14,7 @@ default_working_dir: &default_working_dir
   working_directory: ~/bit
 
 orbs:
-  win: circleci/windows@4.1
+  win: circleci/windows@5.0
 
 windows_default_working_dir: &windows_default_working_dir
   working_directory: C:\Users\circleci\project\bit
@@ -1295,12 +1295,9 @@ jobs:
 
   windows_bvm_install:
     <<: *windows_defaults
-    environment:
-      Path: 'C:\Users\circleci\.npm-global;C:\Users\circleci\AppData\Local\.bvm;$ENV:PATH'
     steps:
       - attach_workspace:
           at: .
-      - run: $ENV:PATH
       - run: nvm install 16.16.0
       - run: nvm use 16.16.0
       - run: npm view @teambit/bit version | Out-File -FilePath .\version.txt
@@ -1313,8 +1310,14 @@ jobs:
           command: 'bvm upgrade'
           no_output_timeout: 60m
       - run: 'setx path "%path%;C:\Users\circleci\AppData\Local\.bvm"'
-      - run: 'bit -v'
-      - run: bit -v | Out-File -FilePath .\version.txt
+      - run:
+          command: bit -v
+          environment:
+            Path: C:\Users\circleci\AppData\Local\.bvm
+      - run:
+          command: bit -v | Out-File -FilePath .\version.txt
+          environment:
+            Path: C:\Users\circleci\AppData\Local\.bvm
       - run: Get-Content -Path .\version.txt
       - save_cache:
           key: v2-bvm-folder-{{ checksum "version.txt" }}
