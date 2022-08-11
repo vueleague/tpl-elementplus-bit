@@ -1298,7 +1298,8 @@ jobs:
     steps:
       - attach_workspace:
           at: .
-      - run: 'SET PATH="C:\Users\circleci\AppData\Local\.bvm;%path%"'
+      - run: 'SET PATH="C:\Users\circleci\AppData\Local\.bvm;%path%"; $ENV:PATH'
+      - run: 'setx path "%path%;C:\Users\circleci\AppData\Local\.bvm"'
       - run: $ENV:PATH
       - run: nvm install 16.16.0
       - run: nvm use 16.16.0
