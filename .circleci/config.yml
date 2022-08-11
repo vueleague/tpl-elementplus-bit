@@ -1295,10 +1295,11 @@ jobs:
 
   windows_bvm_install:
     <<: *windows_defaults
+    environment:
+      Path: C:\Users\circleci\.npm-global;C:\Users\circleci\AppData\Local\.bvm;$PATH
     steps:
       - attach_workspace:
           at: .
-      - run: 'setx path "C:\Users\circleci\.npm-global;C:\Users\circleci\AppData\Local\.bvm;%path%"'
       - run: $ENV:PATH
       - run: nvm install 16.16.0
       - run: nvm use 16.16.0
