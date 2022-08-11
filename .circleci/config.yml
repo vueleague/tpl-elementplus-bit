@@ -1298,6 +1298,8 @@ jobs:
     steps:
       - attach_workspace:
           at: .
+      - run: 'SET PATH="C:\Users\circleci\AppData\Local\.bvm;%path%"'
+      - run: $ENV:PATH
       - run: nvm install 16.16.0
       - run: nvm use 16.16.0
       - run: npm view @teambit/bit version | Out-File -FilePath .\version.txt
@@ -1310,14 +1312,8 @@ jobs:
           command: 'bvm upgrade'
           no_output_timeout: 60m
       - run: 'setx path "%path%;C:\Users\circleci\AppData\Local\.bvm"'
-      - run:
-          command: bit -v
-          environment:
-            Path: C:\Users\circleci\AppData\Local\.bvm
-      - run:
-          command: bit -v | Out-File -FilePath .\version.txt
-          environment:
-            Path: C:\Users\circleci\AppData\Local\.bvm
+      - run: 'bit -v'
+      - run: bit -v | Out-File -FilePath .\version.txt
       - run: Get-Content -Path .\version.txt
       - save_cache:
           key: v2-bvm-folder-{{ checksum "version.txt" }}
