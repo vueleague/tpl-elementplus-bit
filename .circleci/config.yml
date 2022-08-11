@@ -1296,7 +1296,7 @@ jobs:
   windows_bvm_install:
     <<: *windows_defaults
     environment:
-      Path: C:\Users\circleci\AppData\Local\.bvm;$ENV:PATH
+      Path: C:\Users\circleci\AppData\Local\.bvm;%PATH%
     steps:
       - attach_workspace:
           at: .
