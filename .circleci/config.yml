@@ -1314,7 +1314,7 @@ jobs:
           no_output_timeout: 60m
       - run: 'setx path "%path%;%LOCALAPPDATA%\.bvm"'
       - run: $ENV:PATH
-      - run: 'bit -v'
+      - run: $ENV:LOCALAPPDATA\.bvm\bit.cmd -v
       - run: $ENV:LOCALAPPDATA\.bvm\bit.cmd -v | Out-File -FilePath .\version.txt
       - run: Get-Content -Path .\version.txt
       - save_cache:
