@@ -1317,7 +1317,7 @@ jobs:
       - save_cache:
           key: v2-bvm-folder-{{ checksum "version.txt" }}
           paths:
-            - C:\Users\circleci\AppData\Local\.bvm
+            - C:\Program Files\nodejs
       - persist_to_workspace:
           root: .
           paths:
@@ -1333,15 +1333,15 @@ jobs:
     steps:
       - attach_workspace:
           at: .
-      - run: nvm install 16.16.0
-      - run: nvm use 16.16.0
-      - run: node -v
-      - run: npm -v
+      # - run: nvm install 16.16.0
+      # - run: nvm use 16.16.0
       # - run: Get-Content -Path .\version.txt
       # - restore_cache:
       #     key: bvm-folder-v1
       - restore_cache:
           key: v2-bvm-folder-{{ checksum "version.txt" }}
+      - run: node -v
+      - run: npm -v
       # - run: bit -v
       - run: bit -v
       # - run: 'npm i -g @teambit/bvm'
