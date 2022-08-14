@@ -1380,11 +1380,19 @@ jobs:
       #   run: 'ssh-add ~/.ssh/id_rsa'
       - bit_config:
           token: "fake-token"
+          environment:
+            Path: C:\bvm
       - run: 'pwd'
       - run: 'ls'
       - run: 'ls bit\bit'
-      - run: 'cd bit\bit; bit install'
-      - run: 'cd bit\bit; bit compile'
+      - run:
+          command: 'cd bit\bit; bit install'
+          environment:
+            Path: C:\bvm
+      - run:
+          command: 'cd bit\bit; bit compile'
+          environment:
+            Path: C:\bvm
       - run: 'cd bit\bit; npm run build'
       - run: 'cd bit\bit; npm run build:types:windows'
       - persist_to_workspace:
