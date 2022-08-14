@@ -1296,7 +1296,7 @@ jobs:
   windows_bvm_install:
     <<: *windows_defaults
     environment:
-      Path: '\$ENV:LOCALAPPDATA\.bvm;C:\Program Files\Microsoft\jdk-11.0.12.7-hotspot\bin;C:\tools\ruby31\bin;C:\Python310\Scripts\;C:\Python310\;C:\Program Files (x86)\Microsoft SDKs\Azure\CLI2\wbin;C:\Windows\system32;C:\Windows;C:\Windows\System32\Wbem;C:\Windows\System32\WindowsPowerShell\v1.0\;C:\Windows\System32\OpenSSH\;C:\ProgramData\GooGet;C:\Program Files\Google\Compute Engine\metadata_scripts;C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin;C:\Program Files\PowerShell\7\;C:\Program Files\Google\Compute Engine\sysprep;C:\ProgramData\chocolatey\bin;C:\Program Files\Git\cmd;C:\Program Files\Git\mingw64\bin;C:\Program Files\Git\usr\bin;C:\Program Files\Git LFS;C:\Program Files\Amazon\AWSCLIV2\;C:\Program Files\Microsoft\Web Platform Installer\;C:\Program Files\Microsoft Service Fabric\bin\Fabric\Fabric.Code;C:\Program Files\Microsoft SDKs\Service Fabric\Tools\ServiceFabricLocalClusterManager;C:\Program Files\Go\bin;C:\Program Files\OpenJDK\jdk-18.0.1.1\bin;C:\tools\python;C:\Program Files\nodejs\;C:\ProgramData\nvm;C:\Program Files\nodejs;C:\Program Files\Docker;C:\Program Files\dotnet\;C:\Program Files\Microsoft SQL Server\150\Tools\Binn\;C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\170\Tools\Binn\;C:\Program Files (x86)\IncrediBuild;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin;C:\Users\circleci.PACKER-62C74123\AppData\Local\Microsoft\WindowsApps'
+      Path: '$ENV:LOCALAPPDATA\.bvm;C:\Program Files\Microsoft\jdk-11.0.12.7-hotspot\bin;C:\tools\ruby31\bin;C:\Python310\Scripts\;C:\Python310\;C:\Program Files (x86)\Microsoft SDKs\Azure\CLI2\wbin;C:\Windows\system32;C:\Windows;C:\Windows\System32\Wbem;C:\Windows\System32\WindowsPowerShell\v1.0\;C:\Windows\System32\OpenSSH\;C:\ProgramData\GooGet;C:\Program Files\Google\Compute Engine\metadata_scripts;C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin;C:\Program Files\PowerShell\7\;C:\Program Files\Google\Compute Engine\sysprep;C:\ProgramData\chocolatey\bin;C:\Program Files\Git\cmd;C:\Program Files\Git\mingw64\bin;C:\Program Files\Git\usr\bin;C:\Program Files\Git LFS;C:\Program Files\Amazon\AWSCLIV2\;C:\Program Files\Microsoft\Web Platform Installer\;C:\Program Files\Microsoft Service Fabric\bin\Fabric\Fabric.Code;C:\Program Files\Microsoft SDKs\Service Fabric\Tools\ServiceFabricLocalClusterManager;C:\Program Files\Go\bin;C:\Program Files\OpenJDK\jdk-18.0.1.1\bin;C:\tools\python;C:\Program Files\nodejs\;C:\ProgramData\nvm;C:\Program Files\nodejs;C:\Program Files\Docker;C:\Program Files\dotnet\;C:\Program Files\Microsoft SQL Server\150\Tools\Binn\;C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\170\Tools\Binn\;C:\Program Files (x86)\IncrediBuild;C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin;C:\Users\circleci.PACKER-62C74123\AppData\Local\Microsoft\WindowsApps'
     steps:
       - attach_workspace:
           at: .
@@ -1315,7 +1315,7 @@ jobs:
       - run: 'setx path "%path%;%LOCALAPPDATA%\.bvm"'
       - run: $ENV:PATH
       - run: 'bit -v'
-      - run: bit -v | Out-File -FilePath .\version.txt
+      - run: $ENV:LOCALAPPDATA\.bvm\bit.cmd -v | Out-File -FilePath .\version.txt
       - run: Get-Content -Path .\version.txt
       - save_cache:
           key: v2-bvm-folder-{{ checksum "version.txt" }}
