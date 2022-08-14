@@ -1352,7 +1352,11 @@ jobs:
       - restore_cache:
           key: v4-bvm-folder-{{ checksum "version.txt" }}
       # - run: bit -v
-      - run: bit -v
+      - run:
+          name: bit -v
+          command: bit -v
+          environment:
+            Path: C:\bvm
       # - run: 'npm i -g @teambit/bvm'
       # - run: 'bvm list'
       # - run: 'bvm link'
@@ -1397,7 +1401,8 @@ jobs:
     steps:
       - attach_workspace:
           at: .
-      - run: cinst nodejs --version 16.16.0
+      - run: nvm install 16.16.0
+      - run: nvm use 16.16.0
       - run: node -v
       - run: npm -v
       # - run: Get-Content -Path .\version.txt
@@ -1406,7 +1411,7 @@ jobs:
       - restore_cache:
           key: v4-bvm-folder-{{ checksum "version.txt" }}
       # - run: bit -v
-      - run: 'setx path "%path%;C:\Users\circleci\AppData\Local\.bvm"'
+      - run: 'setx path "%path%;C:\bvm"'
       - run: bit -v
       # - run: 'npm i -g @teambit/bvm'
       # - run: 'bvm list'
