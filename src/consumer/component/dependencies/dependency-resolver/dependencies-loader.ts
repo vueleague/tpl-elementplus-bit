@@ -79,6 +79,7 @@ export class DependenciesLoader {
   private setDependenciesDataOnComponent(dependenciesData: DependenciesData) {
     this.component.setDependencies(dependenciesData.allDependencies.dependencies);
     this.component.setDevDependencies(dependenciesData.allDependencies.devDependencies);
+    this.component.setPeerDependencies(dependenciesData.allDependencies.peerDependencies);
     this.component.packageDependencies = dependenciesData.allPackagesDependencies.packageDependencies ?? {};
     this.component.devPackageDependencies = dependenciesData.allPackagesDependencies.devPackageDependencies ?? {};
     this.component.peerPackageDependencies = dependenciesData.allPackagesDependencies.peerPackageDependencies ?? {};

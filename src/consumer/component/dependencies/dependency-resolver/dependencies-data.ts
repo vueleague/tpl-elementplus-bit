@@ -32,8 +32,11 @@ export class DependenciesData {
     const devDependencies = dataParsed.allDependencies.devDependencies.map(
       (dep) => new Dependency(new BitId(dep.id), dep.relativePaths, dep.packageName)
     );
+    const peerDependencies = dataParsed.allDependencies.peerDependencies.map(
+      (dep) => new Dependency(new BitId(dep.id), dep.relativePaths, dep.packageName)
+    );
     const issuesList = IssuesList.deserialize(dataParsed.issues);
-    const allDependencies = { dependencies, devDependencies };
+    const allDependencies = { dependencies, devDependencies, peerDependencies };
     return new DependenciesData(
       allDependencies,
       dataParsed.allPackagesDependencies,

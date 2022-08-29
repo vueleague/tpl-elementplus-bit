@@ -55,6 +55,7 @@ export type ComponentProps = {
   bitJson?: ComponentConfig;
   dependencies?: Dependency[];
   devDependencies?: Dependency[];
+  peerDependencies?: Dependency[];
   flattenedDependencies?: BitIds;
   packageDependencies?: Record<string, string>;
   devPackageDependencies?: Record<string, string>;
@@ -104,6 +105,7 @@ export default class Component {
   dependencies: Dependencies;
   // @ts-ignore AUTO-ADDED-AFTER-MIGRATION-PLEASE-FIX!
   devDependencies: Dependencies;
+  peerDependencies: Dependencies;
   flattenedDependencies: BitIds;
   packageDependencies: Record<string, string>;
   devPackageDependencies: Record<string, string>;
@@ -159,6 +161,7 @@ export default class Component {
     bitJson,
     dependencies,
     devDependencies,
+    peerDependencies,
     flattenedDependencies,
     packageDependencies,
     devPackageDependencies,
@@ -189,6 +192,7 @@ export default class Component {
     this.bitJson = bitJson;
     this.setDependencies(dependencies);
     this.setDevDependencies(devDependencies);
+    this.setPeerDependencies(peerDependencies);
     this.flattenedDependencies = flattenedDependencies || new BitIds();
     this.packageDependencies = packageDependencies || {};
     this.devPackageDependencies = devPackageDependencies || {};
@@ -229,6 +233,7 @@ export default class Component {
     const newInstance: Component = Object.assign(Object.create(Object.getPrototypeOf(this)), this);
     newInstance.setDependencies(this.dependencies.getClone());
     newInstance.setDevDependencies(this.devDependencies.getClone());
+    newInstance.setPeerDependencies(this.peerDependencies.getClone());
     newInstance.overrides = this.overrides.clone();
     newInstance.files = this.files.map((file) => file.clone());
     return newInstance;
@@ -253,6 +258,10 @@ export default class Component {
     this.devDependencies = new Dependencies(devDependencies);
   }
 
+  setPeerDependencies(peerDependencies?: Dependency[]) {
+    this.peerDependencies = new Dependencies(peerDependencies);
+  }
+
   getFileExtension(): string {
     switch (this.lang) {
       case DEFAULT_LANGUAGE:
@@ -275,6 +284,7 @@ export default class Component {
     return [
       ...this.dependencies.dependencies,
       ...this.devDependencies.dependencies,
+      ...this.peerDependencies.dependencies,
       ...this.extensionDependencies.dependencies,
     ];
   }
@@ -283,6 +293,7 @@ export default class Component {
     const dependencies = [
       ...this.dependencies.getClone(),
       ...this.devDependencies.getClone(),
+      ...this.peerDependencies.getClone(),
       ...this.extensionDependencies.getClone(),
     ];
     return new Dependencies(dependencies);
@@ -293,7 +304,11 @@ export default class Component {
   }
 
   getAllNonEnvsDependencies(): Dependency[] {
-    return [...this.dependencies.dependencies, ...this.devDependencies.dependencies];
+    return [
+      ...this.dependencies.dependencies,
+      ...this.devDependencies.dependencies,
+      ...this.peerDependencies.dependencies,
+    ];
   }
 
   getAllDependenciesIds(): BitIds {
@@ -301,10 +316,16 @@ export default class Component {
     return BitIds.fromArray(allDependencies);
   }
 
-  get depsIdsGroupedByType(): { dependencies: BitIds; devDependencies: BitIds; extensionDependencies: BitIds } {
+  get depsIdsGroupedByType(): {
+    dependencies: BitIds;
+    devDependencies: BitIds;
+    peerDependencies: BitIds;
+    extensionDependencies: BitIds;
+  } {
     return {
       dependencies: this.dependencies.getAllIds(),
       devDependencies: this.devDependencies.getAllIds(),
+      peerDependencies: this.peerDependencies.getAllIds(),
       extensionDependencies: this.extensions.extensionsBitIds,
     };
   }
@@ -350,6 +371,7 @@ export default class Component {
       bindingPrefix: this.bindingPrefix,
       dependencies: this.dependencies.serialize(),
       devDependencies: this.devDependencies.serialize(),
+      peerDependencies: this.peerDependencies.serialize(),
       extensions: this.extensions.map((ext) => {
         const res = Object.assign({}, ext.toComponentObject());
         return res;
@@ -410,6 +432,7 @@ export default class Component {
       component: this,
       dependencies,
       devDependencies: [],
+      peerDependencies: [],
       extensionDependencies: [],
     });
   }
@@ -419,6 +442,7 @@ export default class Component {
     if (!componentFromModel) throw new Error('copyDependenciesFromModel: component is missing from the model');
     this.setDependencies(componentFromModel.dependencies.get());
     this.setDevDependencies(componentFromModel.devDependencies.get());
+    this.setPeerDependencies(componentFromModel.peerDependencies.get());
   }
 
   // @ts-ignore AUTO-ADDED-AFTER-MIGRATION-PLEASE-FIX!
@@ -440,6 +464,8 @@ export default class Component {
       dependencies,
       // @ts-ignore AUTO-ADDED-AFTER-MIGRATION-PLEASE-FIX!
       devDependencies,
+      // @ts-ignore AUTO-ADDED-AFTER-MIGRATION-PLEASE-FIX!
+      peerDependencies,
       // @ts-ignore AUTO-ADDED-AFTER-MIGRATION-PLEASE-FIX!
       packageDependencies,
       // @ts-ignore AUTO-ADDED-AFTER-MIGRATION-PLEASE-FIX!
@@ -469,6 +495,7 @@ export default class Component {
       bindingPrefix,
       dependencies,
       devDependencies,
+      peerDependencies,
       packageDependencies,
       devPackageDependencies,
       peerPackageDependencies,

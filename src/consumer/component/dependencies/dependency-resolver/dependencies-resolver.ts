@@ -29,6 +29,7 @@ import PackageJsonFile from '../../../../consumer/component/package-json-file';
 export type AllDependencies = {
   dependencies: Dependency[];
   devDependencies: Dependency[];
+  peerDependencies: Dependency[];
 };
 
 export type AllPackagesDependencies = {
@@ -122,6 +123,7 @@ export default class DependencyResolver {
     this.allDependencies = {
       dependencies: [],
       devDependencies: [],
+      peerDependencies: [],
     };
     this.allPackagesDependencies = {
       packageDependencies: {},
@@ -311,6 +313,13 @@ export default class DependencyResolver {
     if (this.allPackagesDependencies.packageDependencies && packages.peerDependencies) {
       for (const peerName of Object.keys(packages.peerDependencies)) {
         delete this.allPackagesDependencies.packageDependencies[peerName];
+      }
+    }
+    for (const peer of this.allDependencies.peerDependencies) {
+      if (peer.packageName) {
+        this.allDependencies.dependencies = this.allDependencies.dependencies.filter(
+          (dep) => dep.packageName !== peer.packageName
+        );
       }
     }
     if (this.allPackagesDependencies.packageDependencies && packages.peerPackageDependencies) {

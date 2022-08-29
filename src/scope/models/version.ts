@@ -53,6 +53,7 @@ export type VersionProps = {
   docs?: Doclet[];
   dependencies?: Dependency[];
   devDependencies?: Dependency[];
+  peerDependencies?: Dependency[];
   flattenedDependencies?: BitIds;
   // @ts-ignore AUTO-ADDED-AFTER-MIGRATION-PLEASE-FIX!
   packageDependencies?: { [key: string]: string };
@@ -84,6 +85,7 @@ export default class Version extends BitObject {
   docs: Doclet[] | undefined;
   dependencies: Dependencies;
   devDependencies: Dependencies;
+  peerDependencies: Dependencies;
   flattenedDependencies: BitIds;
   // @ts-ignore AUTO-ADDED-AFTER-MIGRATION-PLEASE-FIX!
   packageDependencies: { [key: string]: string };
@@ -109,6 +111,7 @@ export default class Version extends BitObject {
     this.log = props.log;
     this.dependencies = new Dependencies(props.dependencies);
     this.devDependencies = new Dependencies(props.devDependencies);
+    this.peerDependencies = new Dependencies(props.peerDependencies);
     this.docs = props.docs;
     this.flattenedDependencies = props.flattenedDependencies || new BitIds();
     this.packageDependencies = props.packageDependencies || {};
@@ -234,10 +237,16 @@ export default class Version extends BitObject {
     ];
   }
 
-  get depsIdsGroupedByType(): { dependencies: BitIds; devDependencies: BitIds; extensionDependencies: BitIds } {
+  get depsIdsGroupedByType(): {
+    dependencies: BitIds;
+    devDependencies: BitIds;
+    peerDependencies: BitIds;
+    extensionDependencies: BitIds;
+  } {
     return {
       dependencies: this.dependencies.getAllIds(),
       devDependencies: this.devDependencies.getAllIds(),
+      peerDependencies: this.peerDependencies.getAllIds(),
       extensionDependencies: this.extensions.extensionsBitIds,
     };
   }

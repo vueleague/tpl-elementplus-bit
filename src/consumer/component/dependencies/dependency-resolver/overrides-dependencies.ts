@@ -135,7 +135,6 @@ export default class OverridesDependencies {
   }
 
   _getComponentIdToAdd(field: string, dependency: string): { componentId?: BitId; packageName?: string } | undefined {
-    if (field === 'peerDependencies') return undefined;
     const packageData = this._resolvePackageData(dependency);
     return { componentId: packageData?.componentId, packageName: packageData?.name };
   }
