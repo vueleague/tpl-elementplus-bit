@@ -4,7 +4,7 @@ import componentIdToPackageName from '@teambit/legacy/dist/utils/bit/component-i
 import { SemVer } from 'semver';
 import { snapToSemver } from '@teambit/component-package-version';
 import { ComponentDependency, DependencyList, PackageName } from '../dependencies';
-import { VariantPolicy, WorkspacePolicy, EnvPolicy, PeersAutoDetectPolicy } from '../policy';
+import { VariantPolicy, WorkspacePolicy } from '../policy';
 
 import { DependencyResolverMain } from '../dependency-resolver.main.runtime';
 import { ComponentsManifestsMap } from '../types';
@@ -79,28 +79,14 @@ export class WorkspaceManifestFactory {
       components,
       optsWithDefaults.createManifestForComponentsWithoutDependencies
     );
-    const envPeers = this.getEnvsPeersPolicy(componentsManifestsMap);
     const workspaceManifest = new WorkspaceManifest(
       name,
       version,
       dedupedDependencies.rootDependencies,
-      envPeers,
       rootDir,
       componentsManifestsMap
     );
     return workspaceManifest;
-  }
-
-  private getEnvsPeersPolicy(componentsManifestsMap: ComponentsManifestsMap) {
-    const foundEnvs: EnvPolicy[] = [];
-    for (const component of componentsManifestsMap.values()) {
-      foundEnvs.push(component.envPolicy);
-    }
-    const peersPolicies = foundEnvs.map((policy) => policy.peersAutoDetectPolicy);
-    // TODO: At the moment we are just merge everything, so in case of conflicts one will be taken
-    // TODO: once we have root for each env, we should know to handle it differently
-    const mergedPolicies = PeersAutoDetectPolicy.mergePolices(peersPolicies);
-    return mergedPolicies;
   }
 
   /**
@@ -216,8 +202,7 @@ export class WorkspaceManifestFactory {
           };
 
           const version = getVersion();
-          const envPolicy = await this.dependencyResolver.getComponentEnvPolicy(component);
-          const manifest = new ComponentManifest(packageName, new SemVer(version), dependencies, component, envPolicy);
+          const manifest = new ComponentManifest(packageName, new SemVer(version), dependencies, component);
           componentsManifests.set(packageName, manifest);
         }
       })

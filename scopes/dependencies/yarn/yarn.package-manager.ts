@@ -81,7 +81,6 @@ export class YarnPackageManager implements PackageManager {
 
     const rootManifest = workspaceManifest.toJsonWithDir({
       copyPeerToRuntime: installOptions.copyPeerToRuntimeOnRoot,
-      installPeersFromEnvs: installOptions.installPeersFromEnvs,
     }).manifest;
 
     // @ts-ignore
@@ -422,12 +421,12 @@ export class YarnPackageManager implements PackageManager {
   private computeComponents(
     componentManifests: ComponentsManifestsMap,
     componentsDirMap: ComponentMap<string>,
-    copyPeer = false
+    copyPeerToRuntime = false
   ): { [key: string]: any } {
     return componentsDirMap.toArray().reduce((acc, [component, dir]) => {
       const packageName = this.pkg.getPackageName(component);
       if (componentManifests.has(packageName)) {
-        acc[dir] = componentManifests.get(packageName)?.toJson({ copyPeerToRuntime: copyPeer });
+        acc[dir] = componentManifests.get(packageName)?.toJson({ copyPeerToRuntime });
       }
 
       return acc;

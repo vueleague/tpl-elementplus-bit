@@ -1,6 +1,5 @@
 import { Component } from '@teambit/component';
 import { SemVer } from 'semver';
-import { EnvPolicy } from '../policy/env-policy';
 
 import { Manifest, ManifestDependenciesObject } from './manifest';
 
@@ -10,7 +9,6 @@ export class ComponentManifest extends Manifest {
     public version: SemVer,
     public dependencies: ManifestDependenciesObject,
     public component: Component,
-    public envPolicy: EnvPolicy
   ) {
     super(name, version, dependencies);
   }

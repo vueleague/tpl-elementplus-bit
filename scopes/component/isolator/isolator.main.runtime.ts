@@ -53,7 +53,6 @@ export type IsolateComponentsInstallOptions = {
   dedupe?: boolean;
   copyPeerToRuntimeOnComponents?: boolean;
   copyPeerToRuntimeOnRoot?: boolean;
-  installPeersFromEnvs?: boolean;
   installTeambitBit?: boolean;
   packageManagerConfigRootDir?: string;
   // When set to true, the newly added components will be grouped inside one directory.
@@ -142,7 +141,6 @@ type CapsulePackageJsonData = {
 const DEFAULT_ISOLATE_INSTALL_OPTIONS: IsolateComponentsInstallOptions = {
   installPackages: true,
   dedupe: true,
-  installPeersFromEnvs: true,
   copyPeerToRuntimeOnComponents: false,
   copyPeerToRuntimeOnRoot: true,
 };
@@ -357,7 +355,6 @@ export class IsolatorMain {
       dedupe: isolateInstallOptions.dedupe,
       copyPeerToRuntimeOnComponents: isolateInstallOptions.copyPeerToRuntimeOnComponents,
       copyPeerToRuntimeOnRoot: isolateInstallOptions.copyPeerToRuntimeOnRoot,
-      installPeersFromEnvs: isolateInstallOptions.installPeersFromEnvs,
       overrides: this.dependencyResolver.config.capsulesOverrides || this.dependencyResolver.config.overrides,
       rootComponentsForCapsules: this.dependencyResolver.hasRootComponents(),
       useNesting: isolateInstallOptions.useNesting,

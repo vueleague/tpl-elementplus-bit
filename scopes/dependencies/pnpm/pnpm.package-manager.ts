@@ -63,7 +63,6 @@ export class PnpmPackageManager implements PackageManager {
     );
     const rootManifest = workspaceManifest.toJsonWithDir({
       copyPeerToRuntime: installOptions.copyPeerToRuntimeOnRoot,
-      installPeersFromEnvs: installOptions.installPeersFromEnvs,
     });
 
     const componentsManifests = this.computeComponentsManifests(
@@ -191,9 +190,6 @@ export class PnpmPackageManager implements PackageManager {
       const manifest = componentsManifestsFromWorkspace.get(packageName);
       if (manifest) {
         acc[dir] = manifest.toJson({ copyPeerToRuntime });
-        acc[dir].defaultPeerDependencies = fromPairs(
-          manifest.envPolicy.peersAutoDetectPolicy.entries.map(({ name, version }) => [name, version])
-        );
       }
       return acc;
     }, {});
