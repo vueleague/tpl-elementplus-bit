@@ -313,4 +313,21 @@ describe('import functionality on Harmony', function () {
       expect(show.devPackageDependencies).to.include({ '@types/cors': '2.8.10' });
     });
   });
+  describe('import a component when the package-installation fails', () => {
+    before(() => {
+      const nonExistPkg = 'some-non-exist-pkg';
+      helper.scopeHelper.setNewLocalAndRemoteScopesHarmony();
+      helper.bitJsonc.setupDefault();
+      helper.fixtures.populateComponents(1, undefined);
+      helper.npm.addFakeNpmPackage(nonExistPkg, '34.1.22');
+      helper.command.dependenciesSet('comp1', `${nonExistPkg}@34.1.22`);
+      helper.command.tagAllWithoutBuild();
+      helper.command.export();
+
+      helper.scopeHelper.reInitLocalScopeHarmony();
+      helper.scopeHelper.addRemoteScope();
+      helper.command.importComponent('comp1');
+    });
+    it.only('should', () => {});
+  });
 });

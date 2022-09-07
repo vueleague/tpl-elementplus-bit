@@ -123,12 +123,12 @@ export default class ManyComponentsWriter {
     return typeof field === 'undefined' ? defaultValue : Boolean(field);
   }
   async writeAll() {
-    await this._writeComponentsAndDependencies();
     await this._installPackages();
+    await this._writeComponents();
     logger.debug('ManyComponentsWriter, Done!');
   }
-  async _writeComponentsAndDependencies() {
-    logger.debug('ManyComponentsWriter, _writeComponentsAndDependencies');
+  async _writeComponents() {
+    logger.debug('ManyComponentsWriter, _writeComponents');
     await this._populateComponentsFilesToWrite();
     this._moveComponentsIfNeeded();
     await this._persistComponentsData();
