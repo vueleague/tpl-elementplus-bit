@@ -110,7 +110,12 @@ export class ReactMain {
 
   readonly env = this.reactEnv;
 
-  getReactAppType(name: string) {
+  /**
+   * Create a new React app type
+   * @param param0
+   * @returns
+   */
+  createReactAppType({name}: {name: string}) {
     return new ReactAppType(name, this.reactEnv, this.logger, this.dependencyResolver);
   }
 
