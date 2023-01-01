@@ -8,6 +8,10 @@ export async function workspaceConfig({ name, defaultScope, empty }: WorkspaceCo
   configParsed['teambit.workspace/workspace'].name = name;
   configParsed['teambit.workspace/workspace'].defaultScope = scope;
   configParsed['teambit.dependencies/dependency-resolver'].packageManager = 'teambit.dependencies/yarn';
+  // Workaround until we can update the react-native version, because current version doesnt work with jest v27
+  configParsed['teambit.dependencies/dependency-resolver'].overrides = {
+    '@jest/create-cache-key-function': '^27.0.1',
+  };
   configParsed['teambit.dependencies/dependency-resolver'].policy = {
     dependencies: {
       '@teambit/eslint-config-bit-react': '~0.0.367',
@@ -47,7 +51,7 @@ export async function workspaceConfig({ name, defaultScope, empty }: WorkspaceCo
         "teambit.react/react": {},
       },
       "{envs/**}, {extensions/**}": {
-        "teambit.harmony/aspect": {},
+        "teambit.envs/env": {},
       },
     }`),
   };
