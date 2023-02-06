@@ -92,10 +92,10 @@ export class CLIMain {
   /**
    * execute commands registered to this aspect.
    */
-  async run(hasWorkspace: boolean) {
+  async run(hasWorkspace: boolean, args?: string[]) {
     await this.invokeOnStart(hasWorkspace);
     const CliParser = new CLIParser(this.commands, this.groups, undefined, this.community.getBaseDomain());
-    await CliParser.parse();
+    await CliParser.parse(args);
   }
 
   private async invokeOnStart(hasWorkspace: boolean) {
@@ -141,7 +141,7 @@ export class CLIMain {
     const cliGenerateCmd = new CliGenerateCmd(cliMain);
     if (!community) {
       cliMain.register(...legacyCommandsAdapters, new CompletionCmd());
-      return cliMain
+      return cliMain;
     }
     const cliCmd = new CliCmd(cliMain, community.getDocsDomain());
     const helpCmd = new HelpCmd(cliMain, community.getDocsDomain());
