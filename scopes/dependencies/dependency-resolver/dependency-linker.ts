@@ -10,7 +10,6 @@ import { PathAbsolute } from '@teambit/legacy/dist/utils/path';
 import { BitError } from '@teambit/bit-error';
 import { createSymlinkOrCopy } from '@teambit/legacy/dist/utils';
 import componentIdToPackageName from '@teambit/legacy/dist/utils/bit/component-id-to-package-name';
-import Symlink from '@teambit/legacy/dist/links/symlink';
 import { EnvsMain } from '@teambit/envs';
 import { AspectLoaderMain, getCoreAspectName, getCoreAspectPackageName, getAspectDir } from '@teambit/aspect-loader';
 import {
@@ -114,6 +113,59 @@ export class DependencyLinker {
 
     private linkingOptions?: LinkingOptions
   ) {}
+
+  async createLinks(rootDir: string, linkedDeps: Record<string, string>) {
+    const modulesDir = path.join(rootDir, 'node_modules');
+    await Promise.all(
+      Object.entries(linkedDeps).map(([packageName, linkPath]) =>
+        createSymlinkOrCopy(linkPath.substring(5), path.join(modulesDir, packageName))
+      )
+    );
+  }
+
+  async calculateLinkedDeps(
+    rootDir: string | undefined,
+    rootPolicy: WorkspacePolicy,
+    componentDirectoryMap: ComponentMap<string>,
+    options: LinkingOptions = {}
+  ): Promise<{ linkedRootDeps: Record<string, string>; linkResults: LinkResults }> {
+    const linkResults = await this.link(rootDir, rootPolicy, componentDirectoryMap, options);
+    const localLinks: Array<[string, string]> = [];
+    if (linkResults.teambitBitLink) {
+      localLinks.push(this.linkDetailToLocalDepEntry(linkResults.teambitBitLink.linkDetail));
+    }
+    if (linkResults.coreAspectsLinks) {
+      linkResults.coreAspectsLinks.forEach((link) => {
+        localLinks.push(this.linkDetailToLocalDepEntry(link.linkDetail));
+      });
+    }
+    if (linkResults.harmonyLink) {
+      localLinks.push(this.linkDetailToLocalDepEntry(linkResults.harmonyLink));
+    }
+    if (linkResults.teambitLegacyLink) {
+      localLinks.push(this.linkDetailToLocalDepEntry(linkResults.teambitLegacyLink));
+    }
+    if (linkResults.resolvedFromEnvLinks) {
+      linkResults.resolvedFromEnvLinks.forEach((link) => {
+        link.linksDetail.forEach((linkDetail) => {
+          localLinks.push(this.linkDetailToLocalDepEntry(linkDetail));
+        });
+      });
+    }
+    if (linkResults.linkToDirResults) {
+      linkResults.linkToDirResults.forEach((link) => {
+        localLinks.push(this.linkDetailToLocalDepEntry(link.linksDetail));
+      });
+    }
+    return {
+      linkedRootDeps: Object.fromEntries(localLinks.map(([key, value]) => [key, `link:${value}`])),
+      linkResults,
+    };
+  }
+
+  private linkDetailToLocalDepEntry(linkDetail: LinkDetail): [string, string] {
+    return [linkDetail.packageName, linkDetail.from];
+  }
 
   async link(
     rootDir: string | undefined,
@@ -302,13 +354,9 @@ export class DependencyLinker {
           from: `${linkSrc} ${origPath}`,
           to: linkTarget,
         };
-        const linkTargetParent = path.resolve(linkTarget, '..');
-        const relativeSrc = path.relative(linkTargetParent, linkSrc);
-        const symlink = new Symlink(relativeSrc, linkTarget, component.id._legacy, false);
         this.logger.info(
           `linking nested dependency ${folderEntry.moduleName} for component ${component}. link src: ${linkSrc} link target: ${linkTarget}`
         );
-        symlink.write();
         return linkDetail;
       });
 
@@ -380,12 +428,10 @@ export class DependencyLinker {
           from: linkSrc,
           to: linkTarget,
         };
-        fs.removeSync(linkTarget);
         this.logger.info(
           `linking dependency ${depEntry.dependencyId} from env directory ${envDir}. link src: ${linkSrc} link target: ${linkTarget}`
         );
 
-        createSymlinkOrCopy(linkSrc, linkTarget);
         return linkDetail;
       });
       const oneComponentLinks = await Promise.all(oneComponentLinksP);
@@ -429,7 +475,6 @@ export class DependencyLinker {
     if (!shouldSymlink) return undefined;
     const src = this.aspectLoader.mainAspect.path;
     await fs.ensureDir(path.dirname(target));
-    createSymlinkOrCopy(src, target);
     return { packageName: this.aspectLoader.mainAspect.packageName, from: src, to: target };
   }
 
@@ -492,7 +537,6 @@ export class DependencyLinker {
     if (!isAspectDirExist) {
       this.logger.debug(`linkCoreAspect: aspectDir ${aspectDir} does not exist, linking it to ${target}`);
       aspectDir = getAspectDir(id);
-      createSymlinkOrCopy(aspectDir, target);
       return { aspectId: id, linkDetail: { packageName, from: aspectDir, to: target } };
     }
 
@@ -507,7 +551,6 @@ export class DependencyLinker {
         return undefined;
       }
       this.logger.debug(`linkCoreAspect: linking aspectPath ${aspectPath} to ${target}`);
-      createSymlinkOrCopy(aspectPath, target);
       return { aspectId: id, linkDetail: { packageName, from: aspectPath, to: target } };
     } catch (err: any) {
       throw new CoreAspectLinkError(id, err);
@@ -533,7 +576,6 @@ export class DependencyLinker {
         return false;
       }
       // it's a symlink, remove is as it might point to an older version
-      fs.removeSync(targetPath);
       return true;
     }
     return true;
@@ -562,7 +604,6 @@ export class DependencyLinker {
     // In case it's not part of the workspace policy we want to remove it anyway, as we want it to be linked to
     // bit version
     if (isTargetExisting && !existsInRootPolicy) {
-      fs.removeSync(target);
       shouldSymlink = true;
     } else {
       shouldSymlink = this.removeSymlinkTarget(target);
@@ -571,7 +612,6 @@ export class DependencyLinker {
     const isDistDirExist = fs.pathExistsSync(distDir);
     if (!isDistDirExist) {
       const newDir = getDistDirForDevEnv(packageName);
-      createSymlinkOrCopy(newDir, target);
       return { packageName, from: newDir, to: target };
     }
 
@@ -584,7 +624,6 @@ export class DependencyLinker {
       if (fs.existsSync(target)) {
         return undefined;
       }
-      createSymlinkOrCopy(resolvedPath, target);
       return { packageName, from: resolvedPath, to: target };
     } catch (err: any) {
       throw new NonAspectCorePackageLinkError(err, packageName);

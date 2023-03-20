@@ -214,18 +214,13 @@ export class InstallMain {
     // TODO: this make duplicate
     // this.logger.consoleSuccess();
     // TODO: add the links results to the output
-    await this.link({
+    const linkOpts = {
       linkTeambitBit: true,
       linkCoreAspects: this.dependencyResolver.linkCoreAspects(),
       linkDepsResolvedFromEnv: !hasRootComponents,
-      linkNestedDepsInNM: false,
-    });
-    const linkOpts = {
-      linkTeambitBit: false,
-      linkCoreAspects: false,
-      linkDepsResolvedFromEnv: !hasRootComponents,
       linkNestedDepsInNM: !this.workspace.isLegacy && !hasRootComponents,
     };
+    let { linkedRootDeps } = await this.calculateLinks(linkOpts);
     let installCycle = 0;
     let hasMissingLocalComponents = true;
     /* eslint-disable no-await-in-loop */
@@ -240,20 +235,18 @@ export class InstallMain {
         current.manifests,
         mergedRootPolicy,
         current.componentDirectoryMap,
-        { installTeambitBit: false },
+        {
+          linkedDependencies: {
+            [this.workspace.path]: linkedRootDeps,
+          },
+          installTeambitBit: false,
+        },
         pmInstallOptions
       );
-      // Core aspects should be relinked after installation because Yarn removes all symlinks created not by Yarn.
-      // If we don't link the core aspects immediately, the components will fail during load.
-      await this.linkCoreAspectsAndLegacy({
-        linkTeambitBit: false,
-        linkCoreAspects: this.dependencyResolver.linkCoreAspects(),
-        rootPolicy: mergedRootPolicy,
-      });
       if (options?.compile) {
         await this.compiler.compileOnWorkspace([], { initiator: CompilationInitiator.Install });
       }
-      await this.link(linkOpts);
+      linkedRootDeps = (await this.calculateLinks(linkOpts)).linkedRootDeps;
       prevManifests.add(hash(current.manifests));
       // We need to clear cache before creating the new component manifests.
       this.workspace.consumer.componentLoader.clearComponentsCache();
@@ -549,7 +542,9 @@ export class InstallMain {
     return res;
   }
 
-  async link(options: WorkspaceLinkOptions = {}): Promise<WorkspaceLinkResults> {
+  async calculateLinks(
+    options: WorkspaceLinkOptions = {}
+  ): Promise<{ linkResults: WorkspaceLinkResults; linkedRootDeps: Record<string, string> }> {
     await pMapSeries(this.preLinkSlot.values(), (fn) => fn(options)); // import objects if not disabled in options
     const compDirMap = await this.getComponentsDirectory([]);
     const mergedRootPolicy = this.dependencyResolver.getWorkspacePolicy();
@@ -557,7 +552,12 @@ export class InstallMain {
       rootDir: this.workspace.path,
       linkingOptions: options,
     });
-    const res = await linker.link(this.workspace.path, mergedRootPolicy, compDirMap, options);
+    const { linkResults: res, linkedRootDeps } = await linker.calculateLinkedDeps(
+      this.workspace.path,
+      mergedRootPolicy,
+      compDirMap,
+      options
+    );
     const workspaceRes = res as WorkspaceLinkResults;
 
     const bitIds = compDirMap.toArray().map(([component]) => component.id._legacy);
@@ -568,7 +568,17 @@ export class InstallMain {
     if (this.dependencyResolver.hasRootComponents() && options.linkToBitRoots) {
       await this._linkAllComponentsToBitRoots(compDirMap);
     }
-    return res;
+    return { linkResults: res, linkedRootDeps };
+  }
+
+  async link(options: WorkspaceLinkOptions = {}): Promise<WorkspaceLinkResults> {
+    const { linkResults, linkedRootDeps } = await this.calculateLinks(options);
+    const linker = this.dependencyResolver.getLinker({
+      rootDir: this.workspace.path,
+      linkingOptions: options,
+    });
+    await linker.createLinks(this.workspace.path, linkedRootDeps);
+    return linkResults;
   }
 
   private async _linkAllComponentsToBitRoots(compDirMap: ComponentMap<string>) {
