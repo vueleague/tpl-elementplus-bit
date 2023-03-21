@@ -580,8 +580,7 @@ export class DependencyLinker {
   private linkNonAspectCorePackages(
     rootDir: string,
     name: string,
-    packageName = `@teambit/${name}`,
-    existsInRootPolicy = false
+    packageName = `@teambit/${name}`
   ): LinkDetail | undefined {
     if (!this.aspectLoader.mainAspect) return undefined;
     if (!this.aspectLoader.mainAspect.packageName) {
@@ -591,16 +590,6 @@ export class DependencyLinker {
     const distDir = path.join(mainAspectPath, 'dist', name);
 
     const target = path.join(rootDir, 'node_modules', packageName);
-    const isTargetExisting = fs.pathExistsSync(target);
-    let shouldSymlink: boolean;
-    // In case it's not part of the workspace policy we want to remove it anyway, as we want it to be linked to
-    // bit version
-    if (isTargetExisting && !existsInRootPolicy) {
-      shouldSymlink = true;
-    } else {
-      shouldSymlink = this.removeSymlinkTarget(target);
-    }
-    if (!shouldSymlink) return undefined;
     const isDistDirExist = fs.pathExistsSync(distDir);
     if (!isDistDirExist) {
       const newDir = getDistDirForDevEnv(packageName);
@@ -622,20 +611,16 @@ export class DependencyLinker {
     }
   }
 
-  private linkHarmony(rootDir: string, rootPolicy: WorkspacePolicy): LinkDetail | undefined {
+  private linkHarmony(rootDir: string): LinkDetail | undefined {
     const name = 'harmony';
     const packageName = `@teambit/${name}`;
-    const existsInRootPolicy = Boolean(rootPolicy?.find(packageName));
-
-    return this.linkNonAspectCorePackages(rootDir, name, packageName, existsInRootPolicy);
+    return this.linkNonAspectCorePackages(rootDir, name, packageName);
   }
 
-  private linkTeambitLegacy(rootDir: string, rootPolicy: WorkspacePolicy): LinkDetail | undefined {
+  private linkTeambitLegacy(rootDir: string): LinkDetail | undefined {
     const name = 'legacy';
     const packageName = `@teambit/${name}`;
-
-    const existsInRootPolicy = rootPolicy ? !!rootPolicy.find(packageName) : false;
-    return this.linkNonAspectCorePackages(rootDir, name, packageName, existsInRootPolicy);
+    return this.linkNonAspectCorePackages(rootDir, name, packageName);
   }
 }
 
