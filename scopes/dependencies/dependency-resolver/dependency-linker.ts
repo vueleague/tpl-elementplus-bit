@@ -18,7 +18,6 @@ import {
   CoreAspectLinkError,
   NonAspectCorePackageLinkError,
 } from './exceptions';
-import { WorkspacePolicy } from './policy';
 import { DependencyResolverMain } from './dependency-resolver.main.runtime';
 
 export type LinkingOptions = {
