@@ -207,14 +207,14 @@ export class DependencyLinker {
     });
     result = {
       ...result,
-      ...(await this.linkCoreAspectsAndLegacy(rootDir, componentIds, rootPolicy, linkingOpts)),
+      ...(await this.linkCoreAspectsAndLegacy(finalRootDir, componentIds, rootPolicy, linkingOpts)),
     };
     this.logger.consoleSuccess('linking components');
     return result;
   }
 
-  public async linkCoreAspectsAndLegacy(
-    rootDir: string | undefined,
+  async linkCoreAspectsAndLegacy(
+    rootDir: string,
     componentIds: ComponentID[] = [],
     rootPolicy: WorkspacePolicy = new WorkspacePolicy([]),
     options: Pick<LinkingOptions, 'linkTeambitBit' | 'linkCoreAspects'> = {}
@@ -225,32 +225,28 @@ export class DependencyLinker {
       componentIdsWithoutVersions.push(id.toString({ ignoreVersion: true }));
       return undefined;
     });
-    const finalRootDir = rootDir || this.rootDir;
-    if (!finalRootDir) {
-      throw new RootDirNotDefined();
-    }
     const linkingOpts = Object.assign({}, DEFAULT_LINKING_OPTIONS, this.linkingOptions || {}, options || {});
-    if (linkingOpts.linkTeambitBit && !this.isBitRepoWorkspace(finalRootDir)) {
+    if (linkingOpts.linkTeambitBit && !this.isBitRepoWorkspace(rootDir)) {
       const bitLink = await this.linkBitAspectIfNotExist(
-        path.join(finalRootDir, 'node_modules'),
+        path.join(rootDir, 'node_modules'),
         componentIdsWithoutVersions
       );
       result.teambitBitLink = bitLink;
     }
 
-    if (linkingOpts.linkCoreAspects && !this.isBitRepoWorkspace(finalRootDir)) {
+    if (linkingOpts.linkCoreAspects && !this.isBitRepoWorkspace(rootDir)) {
       const hasLocalInstallation = !linkingOpts.linkTeambitBit;
       const coreAspectsLinks = await this.linkNonExistingCoreAspects(
-        path.join(finalRootDir, 'node_modules'),
+        path.join(rootDir, 'node_modules'),
         componentIdsWithoutVersions,
         hasLocalInstallation
       );
       result.coreAspectsLinks = coreAspectsLinks;
     }
 
-    const teambitLegacyLink = this.linkTeambitLegacy(finalRootDir, rootPolicy);
+    const teambitLegacyLink = this.linkTeambitLegacy(rootDir, rootPolicy);
     result.teambitLegacyLink = teambitLegacyLink;
-    const harmonyLink = this.linkHarmony(finalRootDir, rootPolicy);
+    const harmonyLink = this.linkHarmony(rootDir, rootPolicy);
     result.harmonyLink = harmonyLink;
     return result;
   }
@@ -585,7 +581,6 @@ export class DependencyLinker {
     rootDir: string,
     name: string,
     packageName = `@teambit/${name}`,
-    skipExisting = false,
     existsInRootPolicy = false
   ): LinkDetail | undefined {
     if (!this.aspectLoader.mainAspect) return undefined;
@@ -597,10 +592,7 @@ export class DependencyLinker {
 
     const target = path.join(rootDir, 'node_modules', packageName);
     const isTargetExisting = fs.pathExistsSync(target);
-    if (skipExisting && isTargetExisting) {
-      return undefined;
-    }
-    let shouldSymlink;
+    let shouldSymlink: boolean;
     // In case it's not part of the workspace policy we want to remove it anyway, as we want it to be linked to
     // bit version
     if (isTargetExisting && !existsInRootPolicy) {
@@ -635,7 +627,7 @@ export class DependencyLinker {
     const packageName = `@teambit/${name}`;
     const existsInRootPolicy = Boolean(rootPolicy?.find(packageName));
 
-    return this.linkNonAspectCorePackages(rootDir, name, packageName, undefined, existsInRootPolicy);
+    return this.linkNonAspectCorePackages(rootDir, name, packageName, existsInRootPolicy);
   }
 
   private linkTeambitLegacy(rootDir: string, rootPolicy: WorkspacePolicy): LinkDetail | undefined {
@@ -643,7 +635,7 @@ export class DependencyLinker {
     const packageName = `@teambit/${name}`;
 
     const existsInRootPolicy = rootPolicy ? !!rootPolicy.find(packageName) : false;
-    return this.linkNonAspectCorePackages(rootDir, name, packageName, undefined, existsInRootPolicy);
+    return this.linkNonAspectCorePackages(rootDir, name, packageName, existsInRootPolicy);
   }
 }
 

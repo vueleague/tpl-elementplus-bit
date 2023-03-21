@@ -532,16 +532,6 @@ export class InstallMain {
     return this._installModules({ dedupe: true });
   }
 
-  async linkCoreAspectsAndLegacy(options: WorkspaceLinkOptions = {}) {
-    const linker = this.dependencyResolver.getLinker({
-      rootDir: this.workspace.path,
-      linkingOptions: options,
-    });
-    const compIds = await this.workspace.listIds();
-    const res = await linker.linkCoreAspectsAndLegacy(this.workspace.path, compIds, options.rootPolicy, options);
-    return res;
-  }
-
   async calculateLinks(
     options: WorkspaceLinkOptions = {}
   ): Promise<{ linkResults: WorkspaceLinkResults; linkedRootDeps: Record<string, string> }> {
