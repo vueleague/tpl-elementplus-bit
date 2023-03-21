@@ -244,9 +244,9 @@ export class DependencyLinker {
       result.coreAspectsLinks = coreAspectsLinks;
     }
 
-    const teambitLegacyLink = this.linkTeambitLegacy(rootDir, rootPolicy);
+    const teambitLegacyLink = this.linkTeambitLegacy(rootDir);
     result.teambitLegacyLink = teambitLegacyLink;
-    const harmonyLink = this.linkHarmony(rootDir, rootPolicy);
+    const harmonyLink = this.linkHarmony(rootDir);
     result.harmonyLink = harmonyLink;
     return result;
   }

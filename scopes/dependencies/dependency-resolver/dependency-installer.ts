@@ -140,6 +140,7 @@ export class DependencyInstaller {
       throw new RootDirNotDefined();
     }
     if (options.linkedDependencies) {
+      manifests = JSON.parse(JSON.stringify(manifests));
       const directDeps = new Set<string>();
       Object.values(manifests).forEach((manifest) => {
         for (const depName of Object.keys({ ...manifest.dependencies, ...manifest.devDependencies })) {
