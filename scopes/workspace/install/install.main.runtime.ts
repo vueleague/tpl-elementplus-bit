@@ -537,14 +537,12 @@ export class InstallMain {
   ): Promise<{ linkResults: WorkspaceLinkResults; linkedRootDeps: Record<string, string> }> {
     await pMapSeries(this.preLinkSlot.values(), (fn) => fn(options)); // import objects if not disabled in options
     const compDirMap = await this.getComponentsDirectory([]);
-    const mergedRootPolicy = this.dependencyResolver.getWorkspacePolicy();
     const linker = this.dependencyResolver.getLinker({
       rootDir: this.workspace.path,
       linkingOptions: options,
     });
     const { linkResults: res, linkedRootDeps } = await linker.calculateLinkedDeps(
       this.workspace.path,
-      mergedRootPolicy,
       compDirMap,
       options
     );

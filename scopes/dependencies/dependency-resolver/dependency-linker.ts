@@ -125,11 +125,10 @@ export class DependencyLinker {
 
   async calculateLinkedDeps(
     rootDir: string | undefined,
-    rootPolicy: WorkspacePolicy,
     componentDirectoryMap: ComponentMap<string>,
     options: LinkingOptions = {}
   ): Promise<{ linkedRootDeps: Record<string, string>; linkResults: LinkResults }> {
-    const linkResults = await this.link(rootDir, rootPolicy, componentDirectoryMap, options);
+    const linkResults = await this.link(rootDir, componentDirectoryMap, options);
     const localLinks: Array<[string, string]> = [];
     if (linkResults.teambitBitLink) {
       localLinks.push(this.linkDetailToLocalDepEntry(linkResults.teambitBitLink.linkDetail));
@@ -169,7 +168,6 @@ export class DependencyLinker {
 
   async link(
     rootDir: string | undefined,
-    rootPolicy: WorkspacePolicy,
     componentDirectoryMap: ComponentMap<string>,
     options: LinkingOptions = {}
   ): Promise<LinkResults> {
@@ -207,7 +205,7 @@ export class DependencyLinker {
     });
     result = {
       ...result,
-      ...(await this.linkCoreAspectsAndLegacy(finalRootDir, componentIds, rootPolicy, linkingOpts)),
+      ...(await this.linkCoreAspectsAndLegacy(finalRootDir, componentIds, linkingOpts)),
     };
     this.logger.consoleSuccess('linking components');
     return result;
@@ -216,7 +214,6 @@ export class DependencyLinker {
   async linkCoreAspectsAndLegacy(
     rootDir: string,
     componentIds: ComponentID[] = [],
-    rootPolicy: WorkspacePolicy = new WorkspacePolicy([]),
     options: Pick<LinkingOptions, 'linkTeambitBit' | 'linkCoreAspects'> = {}
   ) {
     const result: LinkResults = {};

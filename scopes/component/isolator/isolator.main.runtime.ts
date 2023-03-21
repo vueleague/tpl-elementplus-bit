@@ -437,16 +437,10 @@ export class IsolatorMain {
       rootDir: capsulesDir,
       linkingOptions,
     });
-    const peerOnlyPolicy = this.getWorkspacePeersOnlyPolicy();
-    const { linkedRootDeps } = await linker.calculateLinkedDeps(
-      capsulesDir,
-      peerOnlyPolicy,
-      this.toComponentMap(capsuleList),
-      {
-        ...linkingOptions,
-        linkNestedDepsInNM: !this.dependencyResolver.hasRootComponents() && linkingOptions.linkNestedDepsInNM,
-      }
-    );
+    const { linkedRootDeps } = await linker.calculateLinkedDeps(capsulesDir, this.toComponentMap(capsuleList), {
+      ...linkingOptions,
+      linkNestedDepsInNM: !this.dependencyResolver.hasRootComponents() && linkingOptions.linkNestedDepsInNM,
+    });
     let rootLinks: LinkDetail[] | undefined;
     let nestedLinks: Record<string, Record<string, string>> | undefined;
     if (!this.dependencyResolver.hasRootComponents()) {
